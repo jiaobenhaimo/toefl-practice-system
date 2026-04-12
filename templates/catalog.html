@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}TOEFL Practice — Test Catalog{% endblock %}
+
+{% block body %}
+<div class="catalog-page">
+    <header class="catalog-header">
+        <div class="catalog-header__inner">
+            <div class="catalog-brand">
+                <span class="catalog-brand__icon">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <rect width="28" height="28" rx="6" fill="var(--accent)"/>
+                        <path d="M7 9h14M7 14h10M7 19h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <h1 class="catalog-brand__title">TOEFL Practice</h1>
+            </div>
+            <p class="catalog-brand__sub">Select a test to begin</p>
+        </div>
+    </header>
+
+    <main class="catalog-main">
+        {% if not tests %}
+        <div class="catalog-empty">
+            <p>No tests found.</p>
+            <p class="catalog-empty__hint">Place <code>.md</code> test files in the <code>tests/</code> directory.</p>
+        </div>
+        {% endif %}
+
+        {% for test_id, test in tests.items() %}
+        <article class="test-card" id="card-{{ test_id }}">
+            <div class="test-card__header" onclick="toggleTestCard('{{ test_id }}')">
+                <div class="test-card__title-row">
+                    <h2 class="test-card__title">{{ test.test_name }}</h2>
+                    <span class="test-card__id">{{ test_id }}</span>
+                </div>
+                <div class="test-card__modules-preview">
+                    {% set sections = test.modules | map(attribute='section') | unique | list %}
+                    {% for sec in sections %}
+                    <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
+                    {% endfor %}
+                </div>
+                <span class="test-card__arrow">&#x25BE;</span>
+            </div>
+            <div class="test-card__dropdown" id="dropdown-{{ test_id }}">
+                <a href="/test/{{ test_id }}?mode=full" class="dropdown-option dropdown-option--full">
+                    <span class="dropdown-option__icon">ALL</span>
+                    <div>
+                        <div class="dropdown-option__label">Take Full Test</div>
+                        <div class="dropdown-option__desc">All sections in order: Reading, Listening, Writing, Speaking</div>
+                    </div>
+                </a>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-section-label">Or choose a section:</div>
+                {% set ns = namespace(sections_seen=[]) %}
+                {% for mod in test.modules %}
+                    {% if mod.section not in ns.sections_seen %}
+                        {% set ns.sections_seen = ns.sections_seen + [mod.section] %}
+                        {% set section_mods = test.modules | selectattr('section', 'equalto', mod.section) | list %}
+                        {% set total_time = section_mods | map(attribute='timer_minutes') | sum %}
+                        {% set mod_count = section_mods | length %}
+                <a href="/test/{{ test_id }}?mode=section&amp;section={{ mod.section }}"
+                   class="dropdown-option dropdown-option--section dropdown-option--{{ mod.section }}">
+                    <span class="dropdown-option__icon">{{ mod.section[:1]|upper }}</span>
+                    <div>
+                        <div class="dropdown-option__label">{{ mod.section|capitalize }}{% if mod_count > 1 %} ({{ mod_count }} modules){% endif %}</div>
+                        <div class="dropdown-option__desc">{{ total_time }} minutes</div>
+                    </div>
+                </a>
+                    {% endif %}
+                {% endfor %}
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-option dropdown-option--clear" onclick="event.preventDefault(); clearProgress('{{ test_id }}')">
+                    <span class="dropdown-option__icon">X</span>
+                    <div><div class="dropdown-option__label">Clear Saved Progress</div></div>
+                </button>
+            </div>
+        </article>
+        {% endfor %}
+    </main>
+</div>
+
+<script>
+function toggleTestCard(testId) {
+    const card = document.getElementById('card-' + testId);
+    card.classList.toggle('test-card--open');
+}
+
+function clearProgress(testId) {
+    if (confirm('Clear all saved progress for this test?')) {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('toefl_' + testId)) {
+                keys.push(key);
+            }
+        }
+        keys.forEach(k => localStorage.removeItem(k));
+        alert('Progress cleared.');
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ test_info.test_name }} — TOEFL Practice{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+{% endblock %}
+
+{% block body %}
+<div id="app" class="test-page">
+
+    <!-- LOADING OVERLAY -->
+    <div id="screen-loading" class="screen screen--active">
+        <div class="loading-msg">Loading test…</div>
+    </div>
+
+    <!-- TEST-TAKING SCREEN -->
+    <div id="screen-test" class="screen">
+        <header class="test-header">
+            <div class="test-header__left">
+                <button class="btn btn--icon" onclick="exitModule()" title="Exit">
+                    <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4L7 10l6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+                </button>
+                <div class="test-header__section" id="section-label"></div>
+            </div>
+            <div class="test-header__center">
+                <div class="timer" id="timer">
+                    <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M9 5v4l3 2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+                    <span id="timer-display">--:--</span>
+                </div>
+            </div>
+            <div class="test-header__right">
+                <span class="q-counter" id="q-counter"></span>
+            </div>
+        </header>
+
+        <div class="test-body" id="test-body"></div>
+
+        <footer class="test-footer">
+            <button class="btn btn--secondary" id="btn-prev" onclick="prevQuestion()" style="display:none">
+                &larr; Previous
+            </button>
+            <div class="test-footer__spacer"></div>
+            <button class="btn btn--primary" id="btn-next" onclick="nextQuestion()">
+                Next &rarr;
+            </button>
+        </footer>
+    </div>
+
+    <!-- SECTION TRANSITION SCREEN -->
+    <div id="screen-transition" class="screen">
+        <div class="transition-card">
+            <div class="transition-card__done" id="transition-done"></div>
+            <div class="transition-card__next" id="transition-next"></div>
+            <button class="btn btn--primary" id="btn-continue" onclick="loadAndStartModule()">Continue →</button>
+        </div>
+    </div>
+
+    <!-- RESULTS SCREEN -->
+    <div id="screen-results" class="screen">
+        <header class="screen-header">
+            <h1 class="screen-title" id="results-title">Results</h1>
+        </header>
+        <div class="results-body" id="results-body"></div>
+        <div class="results-actions" id="results-actions"></div>
+    </div>
+
+</div>
+
+<script>
+    const TEST_INFO = {{ test_info|tojson }};
+    const URL_PARAMS = Object.fromEntries(new URLSearchParams(window.location.search));
+</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% endblock %}
