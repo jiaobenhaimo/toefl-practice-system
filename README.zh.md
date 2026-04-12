@@ -15,7 +15,7 @@
 ## 安装
 
 ```bash
-cd toefl-system
+cd toefl-practice-system
 pip install -r requirements.txt
 ```
 
@@ -94,7 +94,7 @@ un[5]able   → 输入 5 个字母 ("avoid")   → "unavoidable"
 ## 项目结构
 
 ```
-toefl-system/
+toefl-practice-system/
   app.py                    Flask 服务器（路由、缓存、路径安全）
   parser.py                 Markdown 试题解析器
   generate_tts_notebook.py  Colab 笔记本生成器（TTS 音频）

@@ -15,7 +15,7 @@ This project is part of **Chao Neng Lu** (超能录), a tutoring program offerin
 ## Installation
 
 ```bash
-cd toefl-system
+cd toefl-practice-system
 pip install -r requirements.txt
 ```
 
@@ -38,7 +38,7 @@ pip install gunicorn
 gunicorn -w 4 -b 0.0.0.0:8080 app:app
 ```
 
-Browsers require HTTPS for microphone access on non-localhost domains. Use a reverse proxy (Nginx, Caddy) with SSL for production. See `docs/` for example configs.
+Browsers require HTTPS for microphone access on non-localhost domains. Use a reverse proxy (Nginx, Caddy) with SSL for production.
 
 ### Docker
 
@@ -94,7 +94,7 @@ Each blank renders as N individual character boxes. The cursor auto-advances whe
 ## Project structure
 
 ```
-toefl-system/
+toefl-practice-system/
   app.py                    Flask server (routes, caching, path security)
   parser.py                 Markdown test file parser
   generate_tts_notebook.py  Colab notebook generator for TTS audio
