@@ -8,6 +8,24 @@ A web-based mock test platform with user authentication, server-side grading, ro
 
 ---
 
+## Changelog
+
+### v1.1
+
+**Bug fixes**
+
+- **Practice mode instant feedback**: Fixed a bug where multiple-choice instant feedback in practice mode was broken because the server was stripping correct answers before sending them to the client. Practice mode API calls now include answers so students can see instant correct/incorrect feedback.
+- **User deletion data cleanup**: Fixed `delete_user` to also remove associated records in the `student_notes` table. Previously, deleting a user left orphaned notes in the database.
+
+**UI improvements**
+
+- **Larger base font size**: Increased the root font size from 16px to 17px for improved readability across all pages.
+- **Users page (admin)**: Increased the "Created" column text size and widened the column. Edit and delete action icons are now larger (22px, up from 18px) for easier interaction.
+- **Results page (teacher)**: Drop-down menus in the "Assign Test" form now match the size of the Assign button (consistent padding and font size).
+- **Catalog cards**: Cards now use a 3:2 aspect ratio, fill horizontal space with `1fr` grid columns, show 4 cards per row on a 14" screen, and maintain a consistent height based on the aspect ratio rather than a fixed pixel value.
+
+---
+
 ## Deployment
 
 ### Prerequisites
@@ -120,7 +138,7 @@ The `/api/module/` endpoint strips correct answers before sending questions to t
 ### Test-taking
 
 - Seven question types: multiple choice, cloze (fill-in-the-blank), build-a-sentence, email, academic discussion, listen-and-repeat, interview
-- Practice mode: replayable audio, instant answer feedback, clearly marked results
+- Practice mode: replayable audio, instant answer feedback (server sends answers to client in practice mode), clearly marked results
 - Timer with amber (5 min) and red (1 min) warnings
 - Progress dots with question bookmarking (reading)
 - Listening lock: controls disabled during audio playback
@@ -136,9 +154,6 @@ The `/api/module/` endpoint strips correct answers before sending questions to t
 - Bulk user import via CSV upload
 - Announcement banner (admin posts, shown site-wide)
 - Student notes on individual questions in result review
-- Per-question time tracking in results
-- Bulk CSV import for creating many accounts at once
-- Announcement system (admin posts banner visible to all users)
 
 ### Export
 
@@ -194,7 +209,7 @@ Place `.md` files in `tests/` with audio in matching subfolders. See `tests/exam
 │   ├── teacher_results.html  Results viewer + test assignment
 │   ├── teacher_progress.html Student progress tracking
 │   ├── account.html          Password change
-│   └── teacher_progress.html  Student progress tracking
+│   └── teacher_progress.html Student progress tracking
 ├── static/
 │   ├── css/style.css         All styles (light + dark, sidebar, cards, modal)
 │   └── js/app.js             Test engine (timer, audio, recording, grading)

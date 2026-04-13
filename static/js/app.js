@@ -203,7 +203,7 @@ async function loadAndStartModule() {
     showScreen('screen-loading');
 
     try {
-        const url = '/api/module/' + encodeURIComponent(mod.filename) + '?module_index=' + mod.module_index;
+        const url = '/api/module/' + encodeURIComponent(mod.filename) + '?module_index=' + mod.module_index + (isPracticeMode ? '&practice=true' : '');
         const resp = await fetch(url);
         if (!resp.ok) throw new Error('Failed to load module');
         const data = await resp.json();

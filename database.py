@@ -170,8 +170,9 @@ def update_user(user_id, display_name=None, password=None, role=None):
 
 
 def delete_user(user_id):
-    """Delete user and their results."""
+    """Delete user and their results, assignments, and notes."""
     conn = get_db()
+    conn.execute("DELETE FROM student_notes WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_results WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_assignments WHERE student_id=? OR teacher_id=?", (user_id, user_id))
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))

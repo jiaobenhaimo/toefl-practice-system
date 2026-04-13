@@ -160,11 +160,13 @@ def api_module(filename):
     if mi >= len(parsed['modules']): abort(404)
     mod = parsed['modules'][mi]
     pages = pages_to_html(build_question_list(mod))
-    # Strip answers for client
+    is_practice = request.args.get('practice') == 'true'
+    # Strip answers for client (keep in practice mode for instant feedback)
     client_pages = []
     for p in pages:
         cp = dict(p)
-        cp.pop('answer', None); cp.pop('cloze_answers', None); cp.pop('cloze_fills', None)
+        if not is_practice:
+            cp.pop('answer', None); cp.pop('cloze_answers', None); cp.pop('cloze_fills', None)
         client_pages.append(cp)
     return jsonify({
         'header': parsed['header'],

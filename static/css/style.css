@@ -36,7 +36,7 @@
 
 /* ===== RESET ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; }
+html { font-size: 17px; }
 body {
     font-family: var(--font-body);
     background: var(--bg);
@@ -131,8 +131,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-inp
 .catalog-empty__hint { font-size: 0.9rem; margin-top: 8px; }
 
 /* ===== TEST CARD GRID ===== */
-.test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
-.test-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.04); cursor: pointer; height: 200px; display: flex; flex-direction: column; }
+.test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 20px; }
+.test-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.04); cursor: pointer; aspect-ratio: 3 / 2; display: flex; flex-direction: column; }
 .test-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .test-card__header { display: flex; flex-direction: column; justify-content: space-between; flex: 1; padding: 24px; }
 .test-card__title { font-size: 1.05rem; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -462,7 +462,7 @@ html[data-theme="dark"] {
 .result-row--clickable:hover { background: var(--bg-hover); }
 
 /* Assignment cards in grid */
-.assignment-card { display: flex; flex-direction: column; justify-content: space-between; height: 200px; padding: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); text-decoration: none; color: var(--text); transition: all 0.2s; }
+.assignment-card { display: flex; flex-direction: column; justify-content: space-between; aspect-ratio: 3 / 2; padding: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); text-decoration: none; color: var(--text); transition: all 0.2s; }
 .assignment-card:hover { border-color: var(--accent); background: var(--bg-hover); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .assignment-card__info { flex: 1; }
 .assignment-card__name { font-size: 1.05rem; font-weight: 600; margin-bottom: 10px; line-height: 1.35; }
@@ -502,8 +502,8 @@ html[data-theme="dark"] {
 .note-area:focus { border-color: var(--accent); outline: none; }
 
 /* ===== USER TABLE ===== */
-.user-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.user-table th { text-align: left; font-weight: 600; color: var(--text-dim); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.user-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.user-table th { text-align: left; font-weight: 600; color: var(--text-dim); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .user-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .user-table tbody tr:last-child td { border-bottom: none; }
 .user-table tbody tr:hover { background: var(--bg-hover); }
