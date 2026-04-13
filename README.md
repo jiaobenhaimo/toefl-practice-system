@@ -2,9 +2,9 @@
 
 # Test Practice System
 
-A web-based mock test platform with user authentication, server-side grading, and admin/teacher dashboards. Teachers author tests in Markdown; the system generates timed tests with audio, recording, auto-grading, and PDF export.
+A web-based mock test platform with user authentication, server-side grading, role-based dashboards, and YAML-driven configuration. Currently configured for TOEFL but designed to support multiple test formats side by side.
 
-Developed for **Chao Neng Lu** (超能录). Currently configured for TOEFL but designed to support other test formats in the future via `config.yaml`.
+Developed for **Chao Neng Lu** (超能录).
 
 ## Quick start
 
@@ -13,102 +13,136 @@ pip install -r requirements.txt
 python app.py                # http://localhost:8080
 ```
 
-Default admin: **admin / admin** (change immediately via `/admin/users`).
+Default admin: **admin / admin** — change immediately at `/admin/users`.
 
 ## Architecture
 
-The application uses SQLite for persistent storage, Flask sessions for authentication, and server-side grading to prevent answer leakage.
+**SQLite** stores users, results, and assignments. **Server-side grading** keeps correct answers off the client. **YAML config** defines site branding and test type definitions (TOEFL, IELTS, etc.) for multi-format support.
 
 ### User roles
 
-**Admin** — manages all user accounts, views all results, assigns tests, and manages test files. Dashboard: `/admin/users`.
-
-**Teacher** — views all student results and assigns specific tests to students. Dashboard: `/teacher/results`.
-
-**Student** — takes assigned tests at `/assignments` and browses all tests at `/catalog`. Views personal history at `/history`. Results are saved to the database.
-
-**Guest** — anonymous practice mode entered from the login page. Can browse the catalog and take tests but results are not saved.
+| Role | Can do |
+|---|---|
+| **Admin** | Manage accounts, view all results, assign tests, manage test files |
+| **Teacher** | View results, assign tests, track student progress |
+| **Student** | Take assigned tests, browse catalog, view own history and detailed results |
+| **Guest** | Browse catalog and practice anonymously (results not saved) |
 
 ### Navigation
 
-The sidebar is always visible on desktop (240px) and hidden behind a hamburger menu on mobile. It shows role-appropriate links: students see Assignments and Catalog; teachers see Catalog and Results; admins see all pages plus Users.
+A sidebar is always visible on desktop (240px) with role-based links: Assignments, Catalog, History, Results, Users. On mobile (≤768px) it collapses behind a hamburger menu. Dark mode and language toggles are in the sidebar footer.
 
-### Test assignments
+### Test catalog
 
-Teachers assign tests to students from `/teacher/results`. Assigned tests appear on the student's `/assignments` page and launch in test mode. Students can also browse and practice freely from `/catalog`.
+Tests display as a responsive grid of 3:2 cards that adapts to screen width (4 columns on 14", fewer on smaller screens). Clicking a card opens a dropdown to choose the full test or an individual section.
 
-### Server-side grading
+### Assignments
 
-The `/api/module/` endpoint strips correct answers from the response. When a student finishes a module, the client submits answers to `/api/grade`, which loads the test server-side, grades each question, and returns results. Results are then saved to the database via `/api/save-results`.
+Teachers assign tests (full or section-only) from `/teacher/results`. Students see their assignments as cards on `/assignments` and can also browse freely at `/catalog`.
+
+### Results
+
+Students view their history at `/history` with clickable rows that open `/results/<id>` — a full breakdown showing check/cross marks, both answers, and time-per-question. Teachers and admins see all student results at `/teacher/results`.
 
 ## Configuration
 
-All site-level settings are in `config.yaml`:
+`config.yaml` controls site branding and test type definitions:
 
 ```yaml
 site:
-  name: "TOEFL Practice"      # Shown in sidebar and page titles
+  name: "TOEFL Practice"
   organization: "Chao Neng Lu"
-test_type: toefl                # For future scaling (ielts, sat, etc.)
-sections:                       # Section colors and labels per test type
+
+default_test_type: toefl
+
+test_types:
   toefl:
-    reading: { label: Reading, color: "#3b6fe0" }
-    ...
+    label: "TOEFL iBT"
+    sections:
+      reading: { label: Reading, color: "#3b6fe0" }
+      listening: { label: Listening, color: "#7c4fd6" }
+      writing: { label: Writing, color: "#1a9f5c" }
+      speaking: { label: Speaking, color: "#d06830" }
+  ielts:
+    label: "IELTS"
+    sections: ...
 ```
 
-Environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `TOEFL_TESTS_DIR` | `./tests` | Test files directory |
-| `TOEFL_DB_PATH` | `./data/toefl.db` | SQLite database path |
-| `SECRET_KEY` | random | Flask session secret |
+To add a new test format, define it under `test_types` and set `test_type:` in the test file's YAML header.
 
 ## Creating tests
 
-Place `.md` files in `tests/` following `FORMAT.md`. Audio (`.ogg`) goes in a matching subfolder. Seven question types are supported: multiple choice, cloze, build-a-sentence, email, academic discussion, listen-and-repeat, and interview.
+Test authoring tools are in the `authoring/` directory:
+
+```bash
+# See format specification
+cat authoring/FORMAT.md
+
+# Generate TTS audio
+python authoring/generate_tts_notebook.py tests/*.tts -o tts_generate.ipynb
+```
+
+Place `.md` files in `tests/` with audio in matching subfolders.
 
 ## Features
 
+- Responsive card grid catalog with 3:2 cards
+- Sidebar navigation (desktop persistent, mobile hamburger)
 - SQLite database (users, results, assignments)
 - Server-side grading (answers never sent to client)
-- Sidebar navigation with role-based links
-- Test assignments (teacher → student)
-- Practice mode with replayable audio and instant feedback
-- Chinese/English catalog UI (auto-detect + manual toggle)
-- Dark mode (system detection + manual toggle)
-- PDF export with student info and time-per-question
-- Progress dots with question bookmarking
-- Audio buffering, cached mic streams, OGG preferred
-- ARIA labels, 44pt touch targets
-- YAML-based site configuration for future scaling
+- Section-level test assignments
+- Student progress tracking with completion percentages
+- Self-service password change for all users
+- Student result detail pages with per-question breakdown
+- Practice mode with instant feedback and replayable audio
+- Chinese/English UI (auto-detect + toggle)
+- Dark mode (system detection + toggle)
+- PDF export via reportlab
+- Time-per-question analytics
+- Progress dots with bookmarking
+- Seven question types
+- YAML configuration for multi-test-type scaling
+- ARIA labels, 44pt touch targets (Apple HIG)
 
 ## Project structure
 
 ```
-toefl-practice-system/
-  config.yaml               Site configuration
-  app.py                    Flask server + auth + API
-  database.py               SQLite module
-  parser.py                 Markdown parser
-  requirements.txt          flask, pyyaml, markdown, reportlab
-  data/toefl.db             Database (auto-created)
-  templates/
-    base.html               Base + i18n + theme
-    nav.html                Sidebar navigation
-    login.html              Login page
-    catalog.html            Test catalog
-    assignments.html        Student assignments
-    test.html               Test-taking interface
-    history.html            Student history
-    admin_users.html        Admin user management
-    teacher_results.html    Teacher results + assignment
-  static/
-    css/style.css           All styles
-    js/app.js               Test engine
-  tests/
-    example-test.md         Example test
+├── config.yaml              Site + test type configuration
+├── app.py                   Flask server + auth + API
+├── database.py              SQLite module
+├── parser.py                Markdown parser
+├── requirements.txt         Dependencies
+├── LICENSE                  GPL v3
+├── authoring/               Test creation tools
+│   ├── FORMAT.md            Markdown format spec
+│   └── generate_tts_notebook.py  TTS generator
+├── templates/               Jinja2 templates
+│   ├── base.html            Base + i18n + theme
+│   ├── nav.html             Sidebar navigation
+│   ├── login.html           Login page
+│   ├── catalog.html         Test catalog (card grid)
+│   ├── assignments.html     Student assignments
+│   ├── test.html            Test-taking interface
+│   ├── history.html         Student history
+│   ├── result_detail.html   Result breakdown
+│   ├── admin_users.html     Admin user management
+│   ├── teacher_results.html Teacher results + assign
+│   ├── teacher_progress.html Student progress tracking
+│   └── account.html         Password change
+├── static/
+│   ├── css/style.css        All styles
+│   └── js/app.js            Test engine
+└── tests/
+    └── example-test.md      Example (all 7 question types)
 ```
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TOEFL_TESTS_DIR` | `./tests` | Test files directory |
+| `TOEFL_DB_PATH` | `./data/toefl.db` | Database path |
+| `SECRET_KEY` | random | Session secret |
 
 ## Production
 

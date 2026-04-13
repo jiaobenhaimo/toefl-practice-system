@@ -1,36 +1,41 @@
 # ===== Site Configuration =====
 
 site:
-  name: "TOEFL Practice"
-  short_name: "TP"
-  description: "Online mock test platform"
+  name: "超能录"
+  short_name: "CNL"
+  description: "Online TOEFL test platform"
   organization: "Chao Neng Lu (超能录)"
 
-# Test type configuration (for future scaling: ielts, sat, gre, etc.)
-test_type: toefl
+# Supported test types — multiple types can coexist.
+# Each test .md file declares its type via `test_type:` in the YAML header.
+# If omitted, the default_test_type is used.
+default_test_type: toefl
 
-# Section definitions — colors and labels
-# To support a new test type, add a new block and reference it in test_type
-sections:
+test_types:
   toefl:
-    reading:
-      label: Reading
-      color: "#3b6fe0"
-      color_dark: "#5e9cff"
-    listening:
-      label: Listening
-      color: "#7c4fd6"
-      color_dark: "#bf5af2"
-    speaking:
-      label: Speaking
-      color: "#d06830"
-      color_dark: "#ff9f0a"
-    writing:
-      label: Writing
-      color: "#1a9f5c"
-      color_dark: "#30d158"
+    label: "TOEFL iBT"
+    sections:
+      reading:   { label: Reading,   color: "#3b6fe0", color_dark: "#5e9cff" }
+      listening:  { label: Listening,  color: "#7c4fd6", color_dark: "#bf5af2" }
+      writing:   { label: Writing,   color: "#1a9f5c", color_dark: "#30d158" }
+      speaking:  { label: Speaking,  color: "#d06830", color_dark: "#ff9f0a" }
+  ielts:
+    label: "IELTS"
+    sections:
+      listening:  { label: Listening,  color: "#7c4fd6", color_dark: "#bf5af2" }
+      reading:   { label: Reading,   color: "#3b6fe0", color_dark: "#5e9cff" }
+      writing:   { label: Writing,   color: "#1a9f5c", color_dark: "#30d158" }
+      speaking:  { label: Speaking,  color: "#d06830", color_dark: "#ff9f0a" }
+  general:
+    label: "General"
+    sections:
+      section1: { label: "Section 1", color: "#3b6fe0", color_dark: "#5e9cff" }
+      section2: { label: "Section 2", color: "#7c4fd6", color_dark: "#bf5af2" }
 
 # Default admin credentials (only used on first run)
 default_admin:
   username: admin
   password: admin
+test_account:
+  username: student
+  password: student

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Manage Users — Admin{% endblock %}
+{% block title %}Users — {{ site.name }}{% endblock %}
 
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
-    <main class="layout__main">
+    <main class="layout__main" style="max-width:960px">
         <h2 class="page-heading">Manage Users</h2>
 
         {% with messages = get_flashed_messages() %}
@@ -15,36 +15,103 @@
 
         <div class="card" style="margin-bottom:24px">
             <h3 class="card__title">Create User</h3>
-            <form method="POST" action="/admin/users/create" class="form-row">
-                <input type="text" name="username" placeholder="Username" required class="login-input">
-                <input type="text" name="display_name" placeholder="Display name" class="login-input">
-                <input type="password" name="password" placeholder="Password" required class="login-input">
-                <select name="role" class="login-input">
-                    <option value="student">Student</option>
-                    <option value="teacher">Teacher</option>
-                </select>
-                <button type="submit" class="btn btn--primary">Create</button>
+            <form method="POST" action="/admin/users/create" id="create-form" onsubmit="return confirmCreate(event)">
+                <div class="form-row" style="margin-bottom:12px">
+                    <input type="text" name="username" placeholder="Username" required class="login-input" id="cf-username">
+                    <input type="text" name="display_name" placeholder="Display name" class="login-input" id="cf-display">
+                    <input type="password" name="password" placeholder="Password" required class="login-input" id="cf-password">
+                </div>
+                <div class="form-row" style="align-items:center">
+                    <div class="role-toggle" id="role-toggle">
+                        <button type="button" class="role-toggle__btn role-toggle__btn--active" data-role="student" onclick="selectRole(this)">Student</button>
+                        <button type="button" class="role-toggle__btn" data-role="teacher" onclick="selectRole(this)">Teacher</button>
+                    </div>
+                    <input type="hidden" name="role" id="cf-role" value="student">
+                    <div style="flex:1"></div>
+                    <button type="submit" class="btn btn--primary">Create User</button>
+                </div>
             </form>
+        </div>
+
+        <!-- Confirm modal -->
+        <div class="test-modal-overlay" id="confirm-overlay" onclick="if(event.target===this)closeConfirm()">
+            <div class="test-modal" role="dialog">
+                <h3 class="test-modal__title">Confirm New User</h3>
+                <div id="confirm-body" style="margin:16px 0;font-size:0.95rem;line-height:1.6"></div>
+                <div style="display:flex;gap:10px;justify-content:flex-end">
+                    <button class="btn btn--secondary" onclick="closeConfirm()">Cancel</button>
+                    <button class="btn btn--primary" id="confirm-submit">Create</button>
+                </div>
+            </div>
         </div>
 
         <div class="card">
             <h3 class="card__title">All Users ({{ users|length }})</h3>
-            <div class="results-list">
-                {% for u in users %}
+            {% for u in users %}
+            <div class="user-row">
                 <div class="result-row result-row--neutral">
-                    <span class="result-row__q" style="min-width:32px">{{ u.id }}</span>
                     <span class="role-badge role-badge--{{ u.role }}">{{ u.role }}</span>
                     <span class="result-row__ans" style="flex:2"><strong>{{ u.display_name }}</strong> <span style="color:var(--text-dim)">@{{ u.username }}</span></span>
                     <span class="result-row__time">{{ u.created_at[:10] }}</span>
                     {% if u.id != user.id %}
+                    <button class="btn btn--icon" onclick="toggleEdit({{ u.id }})" title="Edit" aria-label="Edit" style="color:var(--accent)">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><path d="M11.5 3.5l3 3L6 15H3v-3L11.5 3.5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+                    </button>
                     <form method="POST" action="/admin/users/{{ u.id }}/delete" style="margin:0" onsubmit="return confirm('Delete {{ u.username }}?')">
-                        <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete user" style="color:var(--red)">✕</button>
+                        <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete" style="color:var(--red)">
+                            <svg width="18" height="18" viewBox="0 0 18 18"><path d="M5 5l8 8M13 5l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        </button>
                     </form>
                     {% endif %}
                 </div>
-                {% endfor %}
+                {% if u.id != user.id %}
+                <form method="POST" action="/admin/users/{{ u.id }}/edit" id="edit-{{ u.id }}" style="display:none;padding:8px 16px 12px">
+                    <div class="form-row">
+                        <input type="text" name="display_name" value="{{ u.display_name }}" placeholder="Display name" class="login-input">
+                        <input type="password" name="password" placeholder="New password (leave blank)" class="login-input">
+                        <select name="role" class="login-input" style="max-width:120px">
+                            <option value="student" {{ 'selected' if u.role == 'student' }}>Student</option>
+                            <option value="teacher" {{ 'selected' if u.role == 'teacher' }}>Teacher</option>
+                            <option value="admin" {{ 'selected' if u.role == 'admin' }}>Admin</option>
+                        </select>
+                        <button type="submit" class="btn btn--primary">Save</button>
+                        <button type="button" class="btn btn--secondary" onclick="toggleEdit({{ u.id }})">Cancel</button>
+                    </div>
+                </form>
+                {% endif %}
             </div>
+            {% endfor %}
         </div>
     </main>
 </div>
+
+<script>
+function selectRole(btn) {
+    document.querySelectorAll('.role-toggle__btn').forEach(function(b) { b.classList.remove('role-toggle__btn--active'); });
+    btn.classList.add('role-toggle__btn--active');
+    document.getElementById('cf-role').value = btn.getAttribute('data-role');
+}
+function toggleEdit(uid) {
+    var el = document.getElementById('edit-' + uid);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function confirmCreate(e) {
+    e.preventDefault();
+    var un = document.getElementById('cf-username').value;
+    var dn = document.getElementById('cf-display').value || un;
+    var role = document.getElementById('cf-role').value;
+    document.getElementById('confirm-body').innerHTML =
+        '<strong>' + dn + '</strong> (@' + un + ')<br>' +
+        'Role: <span class="role-badge role-badge--' + role + '">' + role + '</span>';
+    document.getElementById('confirm-submit').onclick = function() {
+        document.getElementById('create-form').onsubmit = null;
+        document.getElementById('create-form').submit();
+    };
+    document.getElementById('confirm-overlay').classList.add('test-modal-overlay--active');
+    return false;
+}
+function closeConfirm() {
+    document.getElementById('confirm-overlay').classList.remove('test-modal-overlay--active');
+}
+</script>
 {% endblock %}

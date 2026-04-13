@@ -13,22 +13,29 @@
             <p class="catalog-empty__hint">Your teacher will assign tests when they're ready.</p>
         </div>
         {% else %}
-        <div class="results-list">
+        <div class="test-grid">
             {% for a in assignments %}
             {% set t = tests.get(a.test_id) %}
             {% if t %}
+            {% if a.section %}
+            <a href="/test/{{ a.test_id }}?mode=section&section={{ a.section }}" class="assignment-card">
+            {% else %}
             <a href="/test/{{ a.test_id }}?mode=full" class="assignment-card">
+            {% endif %}
                 <div class="assignment-card__info">
                     <div class="assignment-card__name">{{ t.test_name }}</div>
-                    <div class="assignment-card__meta">Assigned {{ a.assigned_at[:10] }}</div>
+                    {% if a.section %}
+                    <span class="module-chip module-chip--{{ a.section }}">{{ a.section|capitalize }}</span>
+                    {% else %}
+                    <div class="assignment-card__sections">
+                        {% set sections = t.modules | map(attribute='section') | unique | list %}
+                        {% for sec in sections %}
+                        <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </div>
-                <div class="assignment-card__sections">
-                    {% set sections = t.modules | map(attribute='section') | unique | list %}
-                    {% for sec in sections %}
-                    <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
-                    {% endfor %}
-                </div>
-                <svg width="20" height="20" viewBox="0 0 20 20" class="assignment-card__arrow"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+                <div class="assignment-card__meta">Assigned {{ a.assigned_at[:10] }}</div>
             </a>
             {% endif %}
             {% endfor %}

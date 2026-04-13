@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS test_assignments (
     teacher_id INTEGER NOT NULL,
     student_id INTEGER NOT NULL,
     test_id TEXT NOT NULL,
+    section TEXT DEFAULT NULL,  -- NULL = full test, 'reading' = section only
     assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (teacher_id) REFERENCES users(id),
     FOREIGN KEY (student_id) REFERENCES users(id)
@@ -156,6 +157,17 @@ def save_result(user_id, test_id, test_name, practice, total_correct, total_ques
     conn.close()
 
 
+def get_result_by_id(result_id):
+    """Get a single result by ID."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT r.*, u.display_name, u.username FROM test_results r LEFT JOIN users u ON r.user_id = u.id WHERE r.id=?",
+        (result_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_results(user_id=None, test_id=None, limit=100):
     """Get test results, optionally filtered."""
     conn = get_db()
@@ -176,18 +188,17 @@ def get_results(user_id=None, test_id=None, limit=100):
 
 # ===== Test assignments =====
 
-def assign_test(teacher_id, student_id, test_id):
-    """Assign a test to a student."""
+def assign_test(teacher_id, student_id, test_id, section=None):
+    """Assign a test (or section) to a student."""
     conn = get_db()
-    # Check if already assigned
     existing = conn.execute(
-        "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=?",
-        (teacher_id, student_id, test_id)
+        "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=? AND section IS ?",
+        (teacher_id, student_id, test_id, section)
     ).fetchone()
     if not existing:
         conn.execute(
-            "INSERT INTO test_assignments (teacher_id, student_id, test_id) VALUES (?, ?, ?)",
-            (teacher_id, student_id, test_id)
+            "INSERT INTO test_assignments (teacher_id, student_id, test_id, section) VALUES (?, ?, ?, ?)",
+            (teacher_id, student_id, test_id, section)
         )
         conn.commit()
     conn.close()

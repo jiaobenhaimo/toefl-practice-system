@@ -10,87 +10,78 @@
             <p>No tests found.</p>
             <p class="catalog-empty__hint">Place <code>.md</code> test files in the <code>tests/</code> directory.</p>
         </div>
-        {% endif %}
-
-        {% for test_id, test in tests.items() %}
-        <article class="test-card" id="card-{{ test_id }}">
-            <div class="test-card__header" onclick="toggleTestCard('{{ test_id }}')">
-                <div class="test-card__title-row">
+        {% else %}
+        <div class="test-grid">
+            {% for test_id, test in tests.items() %}
+            <article class="test-card" onclick="openTestModal('{{ test_id }}')">
+                <div class="test-card__header">
                     <div class="test-card__title">{{ test.test_name }}</div>
                     <div class="test-card__modules-preview">
-                        {% set sections = test.modules | map(attribute='section') | unique | list %}
-                        {% for sec in sections %}
-                        <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
-                        {% endfor %}
+                            {% set sections = test.modules | map(attribute='section') | unique | list %}
+                            {% for sec in sections %}
+                            <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
+                            {% endfor %}
                     </div>
                 </div>
-                <span class="test-card__arrow">&#x25BE;</span>
-            </div>
-            <div class="test-card__dropdown" id="dropdown-{{ test_id }}">
-                <div class="student-fields" data-testid="{{ test_id }}">
-                    <input type="text" class="student-field" id="sname-{{ test_id }}" placeholder="Student name (optional)" aria-label="Student name">
-                    <input type="text" class="student-field" id="sid-{{ test_id }}" placeholder="Student ID (optional)" aria-label="Student ID">
-                </div>
-                <div class="dropdown-divider"></div>
-                <a href="/test/{{ test_id }}?mode=full" class="dropdown-option dropdown-option--full">
-                    <span class="dropdown-option__icon">ALL</span>
-                    <div>
-                        <div class="dropdown-option__label">Take Full Test</div>
-                        <div class="dropdown-option__desc">All sections in order</div>
-                    </div>
-                </a>
-                <div class="dropdown-divider"></div>
-                <div class="dropdown-section-label">Choose a section:</div>
-                {% set ns = namespace(sections_seen=[]) %}
-                {% for mod in test.modules %}
-                    {% if mod.section not in ns.sections_seen %}
-                        {% set ns.sections_seen = ns.sections_seen + [mod.section] %}
-                        {% set section_mods = test.modules | selectattr('section', 'equalto', mod.section) | list %}
-                        {% set total_time = section_mods | map(attribute='timer_minutes') | sum %}
-                <a href="/test/{{ test_id }}?mode=section&amp;section={{ mod.section }}"
-                   class="dropdown-option dropdown-option--section dropdown-option--{{ mod.section }}">
-                    <span class="dropdown-option__icon">{{ mod.section[:1]|upper }}</span>
-                    <div>
-                        <div class="dropdown-option__label">{{ mod.section|capitalize }}</div>
-                        <div class="dropdown-option__desc">{{ total_time }} minutes</div>
-                    </div>
-                </a>
-                    {% endif %}
-                {% endfor %}
-            </div>
-        </article>
-        {% endfor %}
+            </article>
+            {% endfor %}
+        </div>
+        {% endif %}
     </main>
 </div>
 
+<!-- Test selection modal -->
+<div class="test-modal-overlay" id="test-modal-overlay" onclick="if(event.target===this)closeTestModal()">
+    <div class="test-modal" id="test-modal" role="dialog" aria-label="Choose test mode">
+        <button class="test-modal__close" onclick="closeTestModal()" aria-label="Close">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <div class="test-modal__title" id="modal-title"></div>
+        <div class="test-modal__chips" id="modal-chips"></div>
+        <div class="test-modal__options" id="modal-options"></div>
+    </div>
+</div>
+
 <script>
-function toggleTestCard(testId) {
-    document.getElementById('card-' + testId).classList.toggle('test-card--open');
-}
-document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.student-fields').forEach(function(wrap) {
-        var tid = wrap.getAttribute('data-testid');
-        var nameEl = document.getElementById('sname-' + tid);
-        var idEl = document.getElementById('sid-' + tid);
-        nameEl.value = localStorage.getItem('student_name_' + tid) || '';
-        idEl.value = localStorage.getItem('student_id_' + tid) || '';
-        function updateLinks() {
-            localStorage.setItem('student_name_' + tid, nameEl.value);
-            localStorage.setItem('student_id_' + tid, idEl.value);
-            var dd = document.getElementById('dropdown-' + tid);
-            dd.querySelectorAll('a.dropdown-option[href]').forEach(function(a) {
-                var url = new URL(a.href, location.origin);
-                if (nameEl.value) url.searchParams.set('student_name', nameEl.value);
-                else url.searchParams.delete('student_name');
-                if (idEl.value) url.searchParams.set('student_id', idEl.value);
-                else url.searchParams.delete('student_id');
-                a.href = url.pathname + url.search;
-            });
-        }
-        nameEl.addEventListener('input', updateLinks);
-        idEl.addEventListener('input', updateLinks);
-        updateLinks();
+var _testData = {{ tests|tojson }};
+function openTestModal(testId) {
+    var test = _testData[testId];
+    if (!test) return;
+    document.getElementById('modal-title').textContent = test.test_name;
+
+    // Section chips
+    var sections = [];
+    test.modules.forEach(function(m) {
+        if (sections.indexOf(m.section) === -1) sections.push(m.section);
     });
+    var chipsHtml = sections.map(function(s) {
+        return '<span class="module-chip module-chip--' + s + '">' + s.charAt(0).toUpperCase() + s.slice(1) + '</span>';
+    }).join('');
+    document.getElementById('modal-chips').innerHTML = chipsHtml;
+
+    // Options
+    var html = '<a href="/test/' + testId + '?mode=full" class="test-modal__option test-modal__option--full">';
+    html += '<span class="test-modal__option-icon">ALL</span>';
+    html += '<div><div class="test-modal__option-label">Take Full Test</div></div></a>';
+
+    html += '<div class="test-modal__divider"></div>';
+
+    sections.forEach(function(sec) {
+        var totalTime = 0;
+        test.modules.forEach(function(m) { if (m.section === sec) totalTime += m.timer_minutes; });
+        html += '<a href="/test/' + testId + '?mode=section&section=' + sec + '" class="test-modal__option">';
+        html += '<span class="test-modal__option-icon" style="color:var(--' + sec + ')">' + sec.charAt(0).toUpperCase() + '</span>';
+        html += '<div><div class="test-modal__option-label">' + sec.charAt(0).toUpperCase() + sec.slice(1) + '</div>';
+        html += '<div class="test-modal__option-desc">' + totalTime + ' min</div></div></a>';
+    });
+    document.getElementById('modal-options').innerHTML = html;
+    document.getElementById('test-modal-overlay').classList.add('test-modal-overlay--active');
+}
+function closeTestModal() {
+    document.getElementById('test-modal-overlay').classList.remove('test-modal-overlay--active');
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeTestModal();
 });
 </script>
 {% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Progress — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main" style="max-width:960px">
+        <h2 class="page-heading">Student Progress</h2>
+
+        {% if not progress %}
+        <div class="catalog-empty">
+            <p>No students found.</p>
+        </div>
+        {% else %}
+        <div class="results-list">
+            {% for p in progress %}
+            <div class="progress-row">
+                <div class="progress-row__info">
+                    <strong>{{ p.student.display_name }}</strong>
+                    <span style="color:var(--text-dim)">@{{ p.student.username }}</span>
+                </div>
+                <div class="progress-row__bar-wrap">
+                    <div class="progress-row__bar">
+                        <div class="progress-row__fill" style="width:{{ p.pct }}%"></div>
+                    </div>
+                </div>
+                <div class="progress-row__stat">
+                    {{ p.done }}/{{ p.total }}
+                    <span style="color:var(--text-dim)">({{ p.pct }}%)</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}

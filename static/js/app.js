@@ -29,8 +29,8 @@ let audioPlaying = false;   // True while audio is playing (blocks Next in liste
 let cachedMicStream = null; // Reuse mic stream across speaking questions
 let bookmarkedQuestions = new Set(); // Bookmarked question indices (reading only)
 let isPracticeMode = false;         // Practice mode: replay audio, instant feedback
-let studentName = '';               // Student name (from URL params)
-let studentId = '';                 // Student ID (from URL params)
+
+
 let questionTimes = {};             // { qid: seconds spent }
 let questionStartTime = 0;          // Date.now() when current question was shown
 let playedAudio = new Set();    // Track audio clips already played (for no-replay mode)
@@ -138,8 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
     _activeScreen = document.querySelector('.screen--active');
     const mode = URL_PARAMS.mode || 'full';
     isPracticeMode = URL_PARAMS.practice === 'true';
-    studentName = URL_PARAMS.student_name || '';
-    studentId = URL_PARAMS.student_id || '';
+
+
 
     // Force English during test-taking (Chinese only in catalog)
     window._lang = 'en';
@@ -1400,9 +1400,10 @@ async function downloadFullZip() {
 
         // Text answers
         let txt = 'Test: ' + TEST_INFO.test_name + '\n';
-        if (studentName) txt += 'Student: ' + studentName + '\n';
-        if (studentId) txt += 'ID: ' + studentId + '\n';
+        
+        
         if (isPracticeMode) txt += 'Mode: PRACTICE\n';
+
         txt += 'Section: ' + result.section + '\nModule: ' + result.moduleNum + '\n';
         txt += 'Date: ' + new Date().toISOString() + '\n';
         if (result.score.total > 0) {
@@ -1446,8 +1447,6 @@ async function exportPdf() {
         test_name: TEST_INFO.test_name,
         test_id: TEST_INFO.test_id,
         practice: isPracticeMode,
-        student_name: studentName,
-        student_id: studentId,
         lang: window._lang || 'en',
         date: new Date().toISOString(),
         results: allResults.map(r => ({

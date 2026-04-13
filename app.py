@@ -296,8 +296,67 @@ def teacher_results():
 def teacher_assign():
     sid = request.form.get('student_id', type=int)
     tid = request.form.get('test_id','')
-    if sid and tid: db.assign_test(cur_user()['id'], sid, tid); flash('Test assigned')
+    sec = request.form.get('section','').strip() or None
+    if sid and tid: db.assign_test(cur_user()['id'], sid, tid, sec); flash('Test assigned')
     return redirect('/teacher/results')
+
+@app.route('/teacher/progress')
+@require_login
+@require_role('admin','teacher')
+def teacher_progress():
+    students = db.list_users(role='student')
+    progress_data = []
+    for s in students:
+        assignments = db.get_assignments(student_id=s['id'])
+        results = db.get_results(user_id=s['id'])
+        completed_keys = set()
+        for r in results:
+            if not r['practice']:
+                completed_keys.add(r['test_id'])
+        total = len(assignments)
+        done = sum(1 for a in assignments if a['test_id'] in completed_keys)
+        progress_data.append({
+            'student': s,
+            'total': total,
+            'done': done,
+            'pct': round(done / total * 100) if total > 0 else 0,
+            'assignments': assignments,
+        })
+    return render_template('teacher_progress.html', progress=progress_data, user=cur_user())
+
+# ===== Account =====
+
+@app.route('/account', methods=['GET','POST'])
+@require_login
+def account():
+    u = cur_user()
+    if request.method == 'POST':
+        old_pw = request.form.get('old_password','')
+        new_pw = request.form.get('new_password','')
+        confirm_pw = request.form.get('confirm_password','')
+        if not db.authenticate(u['username'], old_pw):
+            flash('Current password is incorrect')
+        elif new_pw != confirm_pw:
+            flash('New passwords do not match')
+        elif len(new_pw) < 1:
+            flash('New password cannot be empty')
+        else:
+            db.update_user(u['id'], password=new_pw)
+            flash('Password changed successfully')
+        return redirect('/account')
+    return render_template('account.html', user=u)
+
+# ===== Results Detail =====
+
+@app.route('/results/<int:result_id>')
+@require_login
+def result_detail(result_id):
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    # Students can only view their own; teachers/admins can view all
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    return render_template('result_detail.html', result=r, user=u)
 
 # ===== History =====
 

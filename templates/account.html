@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Account — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main" style="max-width:520px">
+        <h2 class="page-heading">Account</h2>
+
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="flash-msg">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="card" style="margin-bottom:24px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+                <strong style="font-size:1.1rem">{{ user.display_name }}</strong>
+                <span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>
+            </div>
+            <div style="color:var(--text-muted);font-size:0.9rem">@{{ user.username }}</div>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Change Password</h3>
+            <form method="POST" action="/account" style="display:flex;flex-direction:column;gap:12px">
+                <input type="password" name="old_password" placeholder="Current password" required class="login-input" autocomplete="current-password">
+                <input type="password" name="new_password" placeholder="New password" required class="login-input" autocomplete="new-password">
+                <input type="password" name="confirm_password" placeholder="Confirm new password" required class="login-input" autocomplete="new-password">
+                <button type="submit" class="btn btn--primary" style="align-self:flex-start">Update Password</button>
+            </form>
+        </div>
+    </main>
+</div>
+{% endblock %}

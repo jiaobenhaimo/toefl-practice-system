@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Result — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main" style="max-width:860px">
+        <a href="{{ url_for('history_page') }}" class="back-link">&larr; Back to History</a>
+        <h2 class="page-heading">
+            {{ result.test_name or result.test_id }}
+            {% if result.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
+        </h2>
+        <p class="result-meta">
+            {{ result.display_name or result.username or 'Guest' }} &middot;
+            {{ result.date[:10] }}
+            {% if result.total_questions > 0 %}
+            &middot; {{ result.total_correct }}/{{ result.total_questions }}
+            ({{ (result.total_correct / result.total_questions * 100)|round|int }}%)
+            {% endif %}
+        </p>
+
+        {% set sections = result.sections_json | tojson | safe %}
+        <div id="result-sections"></div>
+
+        <script>
+        (function() {
+            var sections = {{ result.sections_json | safe }};
+            var container = document.getElementById('result-sections');
+            if (!sections || !sections.length) {
+                container.innerHTML = '<p style="color:var(--text-muted)">No detailed results available.</p>';
+                return;
+            }
+
+            var checkSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M4 9l3.5 3.5L14 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            var crossSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M5 5l8 8M13 5l-8 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
+
+            sections.forEach(function(sec) {
+                var html = '<div class="results-module">';
+                html += '<h3 class="results-module__title">' + (sec.section || '').charAt(0).toUpperCase() + (sec.section || '').slice(1) + ' — Module ' + (sec.moduleNum || 1) + '</h3>';
+
+                var s = sec.score || {};
+                if (s.total > 0) {
+                    var pct = Math.round((s.correct / s.total) * 100);
+                    html += '<div class="results-score"><div class="results-score__circle"><span class="results-score__num">' + s.correct + '</span><span class="results-score__den">/ ' + s.total + '</span></div><div class="results-score__pct">' + pct + '%</div></div>';
+                }
+
+                html += '<div class="results-list">';
+                (sec.details || []).forEach(function(d) {
+                    var timeLabel = d.time ? '<span class="result-row__time">' + d.time + 's</span>' : '';
+                    if (d.type === 'mc' || d.type === 'build_sentence' || d.type === 'cloze') {
+                        var cls = d.correct ? 'result-row--correct' : 'result-row--wrong';
+                        html += '<div class="result-row ' + cls + '">';
+                        html += '<span class="result-row__q">Q' + d.qid + '</span>';
+                        html += '<span class="result-row__icon">' + (d.correct ? checkSvg : crossSvg) + '</span>';
+                        html += '<span class="result-row__ans">' + (d.user || '—') + '</span>';
+                        html += '<span class="result-row__correct">' + (d.fullWord || d.expected || '') + '</span>';
+                        html += timeLabel + '</div>';
+                    } else if (d.type === 'email' || d.type === 'discussion') {
+                        html += '<div class="result-row result-row--neutral">';
+                        html += '<span class="result-row__q">Q' + d.qid + '</span>';
+                        html += '<span class="result-row__ans">' + d.type + ' — ' + (d.wordCount || 0) + ' words</span>';
+                        html += timeLabel + '</div>';
+                    } else if (d.type === 'listen_repeat' || d.type === 'interview') {
+                        html += '<div class="result-row ' + (d.hasRecording ? 'result-row--neutral' : 'result-row--wrong') + '">';
+                        html += '<span class="result-row__q">Q' + d.qid + '</span>';
+                        html += '<span class="result-row__ans">' + (d.hasRecording ? 'Audio recorded' : 'No recording') + '</span>';
+                        html += timeLabel + '</div>';
+                    }
+                });
+                html += '</div></div>';
+                container.innerHTML += html;
+            });
+        })();
+        </script>
+    </main>
+</div>
+{% endblock %}

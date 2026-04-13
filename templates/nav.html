@@ -32,6 +32,10 @@
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 15l4-6 3 3 4-5 3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Results
         </a>
+        <a href="/teacher/progress" class="sidebar__link" aria-label="Student Progress">
+            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="12" width="3" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="8.5" y="8" width="3" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="14" y="4" width="3" height="13" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+            Progress
+        </a>
         {% endif %}
         {% if user and user.role == 'admin' %}
         <a href="/admin/users" class="sidebar__link" aria-label="Manage Users">
@@ -54,6 +58,10 @@
             <span class="sidebar__user-name">{{ user.display_name }}</span>
             <span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>
         </div>
+        <a href="/account" class="sidebar__link sidebar__link--muted" aria-label="Account settings">
+            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            Account
+        </a>
         <a href="/logout" class="sidebar__link sidebar__link--muted" aria-label="Log out">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Log out
