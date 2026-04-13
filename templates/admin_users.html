@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Manage Users — Admin{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main">
+        <h2 class="page-heading">Manage Users</h2>
+
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="flash-msg">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="card" style="margin-bottom:24px">
+            <h3 class="card__title">Create User</h3>
+            <form method="POST" action="/admin/users/create" class="form-row">
+                <input type="text" name="username" placeholder="Username" required class="login-input">
+                <input type="text" name="display_name" placeholder="Display name" class="login-input">
+                <input type="password" name="password" placeholder="Password" required class="login-input">
+                <select name="role" class="login-input">
+                    <option value="student">Student</option>
+                    <option value="teacher">Teacher</option>
+                </select>
+                <button type="submit" class="btn btn--primary">Create</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">All Users ({{ users|length }})</h3>
+            <div class="results-list">
+                {% for u in users %}
+                <div class="result-row result-row--neutral">
+                    <span class="result-row__q" style="min-width:32px">{{ u.id }}</span>
+                    <span class="role-badge role-badge--{{ u.role }}">{{ u.role }}</span>
+                    <span class="result-row__ans" style="flex:2"><strong>{{ u.display_name }}</strong> <span style="color:var(--text-dim)">@{{ u.username }}</span></span>
+                    <span class="result-row__time">{{ u.created_at[:10] }}</span>
+                    {% if u.id != user.id %}
+                    <form method="POST" action="/admin/users/{{ u.id }}/delete" style="margin:0" onsubmit="return confirm('Delete {{ u.username }}?')">
+                        <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete user" style="color:var(--red)">✕</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}

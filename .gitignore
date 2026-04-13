@@ -194,3 +194,4 @@ cython_debug/
 ._*
 /tests
 my_notebook.ipynb
+/data

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Login — TOEFL Practice{% endblock %}
+
+{% block body %}
+<div class="login-page">
+    <div class="login-card">
+        <div class="login-brand">
+            <svg width="36" height="36" viewBox="0 0 28 28" fill="none">
+                <rect width="28" height="28" rx="6" fill="var(--accent)"/>
+                <path d="M7 9h14M7 14h10M7 19h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="login-brand__title">TOEFL Practice</span>
+        </div>
+        {% if error %}
+        <div class="login-error">{{ error }}</div>
+        {% endif %}
+        <form method="POST" class="login-form">
+            <input type="text" name="username" placeholder="Username" required autofocus autocomplete="username" class="login-input" aria-label="Username">
+            <input type="password" name="password" placeholder="Password" required autocomplete="current-password" class="login-input" aria-label="Password">
+            <label class="login-remember">
+                <input type="checkbox" name="remember"> Remember me
+            </label>
+            <button type="submit" class="btn btn--primary login-btn">Log in</button>
+        </form>
+        <div class="login-divider"><span>or</span></div>
+        <a href="/guest" class="btn btn--secondary login-btn">Continue as Guest</a>
+        <p class="login-guest-note">Guests can practice but results won't be saved.</p>
+    </div>
+</div>
+{% endblock %}

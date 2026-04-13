@@ -1,123 +1,123 @@
 **[English](README.md)** | **[中文](README.zh.md)**
 
-# TOEFL Practice Test System
+# Test Practice System
 
-A web-based TOEFL mock test platform built with Flask and vanilla JavaScript. Teachers author tests in a custom Markdown format; the system parses them into an interactive, timed test-taking interface with auto-grading, audio playback, microphone recording, and downloadable results.
+A web-based mock test platform with user authentication, server-side grading, and admin/teacher dashboards. Teachers author tests in Markdown; the system generates timed tests with audio, recording, auto-grading, and PDF export.
 
-This project is part of **Chao Neng Lu** (超能录), a tutoring program offering AP/A-Level courses, competition prep, JLPT, TOPIK, and TOEFL/IELTS tutoring.
+Developed for **Chao Neng Lu** (超能录). Currently configured for TOEFL but designed to support other test formats in the future via `config.yaml`.
 
-## Prerequisites
-
-- Python 3.9+
-- A modern browser (Chrome, Firefox, Safari, or Edge)
-- For speaking questions: a microphone and browser mic permission
-
-## Installation
+## Quick start
 
 ```bash
-cd toefl-practice-system
 pip install -r requirements.txt
+python app.py                # http://localhost:8080
 ```
 
-## Running the server
+Default admin: **admin / admin** (change immediately via `/admin/users`).
 
-```bash
-# Default: starts on port 8080
-python app.py
+## Architecture
 
-# Custom port
-python app.py --port 3000
+The application uses SQLite for persistent storage, Flask sessions for authentication, and server-side grading to prevent answer leakage.
+
+### User roles
+
+**Admin** — manages all user accounts, views all results, assigns tests, and manages test files. Dashboard: `/admin/users`.
+
+**Teacher** — views all student results and assigns specific tests to students. Dashboard: `/teacher/results`.
+
+**Student** — takes assigned tests at `/assignments` and browses all tests at `/catalog`. Views personal history at `/history`. Results are saved to the database.
+
+**Guest** — anonymous practice mode entered from the login page. Can browse the catalog and take tests but results are not saved.
+
+### Navigation
+
+The sidebar is always visible on desktop (240px) and hidden behind a hamburger menu on mobile. It shows role-appropriate links: students see Assignments and Catalog; teachers see Catalog and Results; admins see all pages plus Users.
+
+### Test assignments
+
+Teachers assign tests to students from `/teacher/results`. Assigned tests appear on the student's `/assignments` page and launch in test mode. Students can also browse and practice freely from `/catalog`.
+
+### Server-side grading
+
+The `/api/module/` endpoint strips correct answers from the response. When a student finishes a module, the client submits answers to `/api/grade`, which loads the test server-side, grades each question, and returns results. Results are then saved to the database via `/api/save-results`.
+
+## Configuration
+
+All site-level settings are in `config.yaml`:
+
+```yaml
+site:
+  name: "TOEFL Practice"      # Shown in sidebar and page titles
+  organization: "Chao Neng Lu"
+test_type: toefl                # For future scaling (ielts, sat, etc.)
+sections:                       # Section colors and labels per test type
+  toefl:
+    reading: { label: Reading, color: "#3b6fe0" }
+    ...
 ```
 
-Open `http://localhost:8080` in your browser.
+Environment variables:
 
-### Production deployment
+| Variable | Default | Description |
+|---|---|---|
+| `TOEFL_TESTS_DIR` | `./tests` | Test files directory |
+| `TOEFL_DB_PATH` | `./data/toefl.db` | SQLite database path |
+| `SECRET_KEY` | random | Flask session secret |
 
-```bash
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:8080 app:app
-```
+## Creating tests
 
-Browsers require HTTPS for microphone access on non-localhost domains. Use a reverse proxy (Nginx, Caddy) with SSL for production.
+Place `.md` files in `tests/` following `FORMAT.md`. Audio (`.ogg`) goes in a matching subfolder. Seven question types are supported: multiple choice, cloze, build-a-sentence, email, academic discussion, listen-and-repeat, and interview.
 
-## Usage
+## Features
 
-### For teachers: creating tests
-
-1. Write `.md` files following the format in `FORMAT.md`.
-2. For listening/speaking, place `.ogg` audio files in a folder named after the `.md` file (minus the extension).
-3. Drop files into the `tests/` directory. The catalog updates automatically.
-
-A single `.md` file can contain multiple modules of the same section (e.g., Reading Module 1 and Module 2) or even all four sections. Multiple `.md` files sharing the same `test_id` are merged into one test.
-
-### For teachers: generating TTS audio
-
-```bash
-python generate_tts_notebook.py tests/*.tts -o tts_generate.ipynb
-```
-
-Upload the generated `.ipynb` to Google Colab, select a T4 GPU runtime, and run all cells. The notebook uses Kokoro TTS with `af_heart` (female) and `am_fenrir` (male) voices to produce `.ogg` files.
-
-### For students: taking a test
-
-1. Open `http://localhost:8080` and click a test card.
-2. Choose **Take Full Test** (all sections in order) or a **specific section** (e.g., Reading). Choosing a section starts all modules of that section as a chain.
-3. Answer one question at a time. The countdown timer turns amber at 5 minutes remaining and red at 1 minute.
-4. **Reading:** allows backward navigation. All other sections are forward-only.
-5. **Listening:** audio plays once automatically. While the audio is playing, the Next button and answer choices are disabled. No replay.
-6. **Speaking:** fully automatic flow. The prompt audio plays, then a 3-second countdown appears ("Recording in 3... 2... 1..."), the microphone activates, and a real-time waveform shows mic input. When the question timer expires, recording stops and the system auto-advances to the next question.
-7. **Writing:** type in the text area with live word count.
-8. Between different sections, a transition screen shows which section is complete and what comes next. No scores are shown until the end.
-9. On the final results screen, scores are shown per section with per-question detail. Cloze blanks show green/red per blank. Click **Download Answers (.zip)** to get text answers and audio recordings.
-
-Progress auto-saves every 30 seconds. Audio recordings cannot be saved across sessions.
-
-### Cloze (fill-in-the-blank) format
-
-Blanks use `prefix[N]suffix` syntax where N is the number of missing letters:
-
-```
-manu[7]     → student types 7 letters ("scripts") → "manuscripts"
-centu[4]    → student types 4 letters ("ries")    → "centuries"
-un[5]able   → student types 5 letters ("avoid")   → "unavoidable"
-```
-
-Each blank renders as N individual character boxes. The cursor auto-advances when a box is filled, and wraps from the last blank to the first.
+- SQLite database (users, results, assignments)
+- Server-side grading (answers never sent to client)
+- Sidebar navigation with role-based links
+- Test assignments (teacher → student)
+- Practice mode with replayable audio and instant feedback
+- Chinese/English catalog UI (auto-detect + manual toggle)
+- Dark mode (system detection + manual toggle)
+- PDF export with student info and time-per-question
+- Progress dots with question bookmarking
+- Audio buffering, cached mic streams, OGG preferred
+- ARIA labels, 44pt touch targets
+- YAML-based site configuration for future scaling
 
 ## Project structure
 
 ```
 toefl-practice-system/
-  app.py                    Flask server (routes, caching, path security)
-  parser.py                 Markdown test file parser
-  generate_tts_notebook.py  Colab notebook generator for TTS audio
-  requirements.txt          flask, pyyaml, markdown
-  FORMAT.md                 Full Markdown format specification
-  LICENSE                   GPL v3
-  templates/                Jinja2 templates (catalog, test, base)
-  static/css/style.css      Light-themed UI (Apple HIG compliant)
-  static/js/app.js          Test engine
-  tests/                    Test content (*.md, *.tts, audio folders)
-    example-test.md         Example test with all 7 question types
+  config.yaml               Site configuration
+  app.py                    Flask server + auth + API
+  database.py               SQLite module
+  parser.py                 Markdown parser
+  requirements.txt          flask, pyyaml, markdown, reportlab
+  data/toefl.db             Database (auto-created)
+  templates/
+    base.html               Base + i18n + theme
+    nav.html                Sidebar navigation
+    login.html              Login page
+    catalog.html            Test catalog
+    assignments.html        Student assignments
+    test.html               Test-taking interface
+    history.html            Student history
+    admin_users.html        Admin user management
+    teacher_results.html    Teacher results + assignment
+  static/
+    css/style.css           All styles
+    js/app.js               Test engine
+  tests/
+    example-test.md         Example test
 ```
 
-## Design
+## Production
 
-The UI follows Apple Human Interface Guidelines: system font stack (SF Pro / system-ui), 44pt minimum touch targets, clean white/light-gray palette, semantic colors, and animations under 0.3 seconds.
-
-## Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `TOEFL_TESTS_DIR` | `<script_dir>/tests` | Test files and audio directory |
-
-## Known limitations
-
-- Client-side grading: answers are visible in the API response.
-- Audio recordings are lost if the browser is closed mid-speaking-module.
-- No user authentication; progress is stored in browser localStorage.
-- Cloze grading is exact-match only (case-insensitive).
+```bash
+pip install gunicorn
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+gunicorn -w 4 -b 0.0.0.0:8080 app:app
+```
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) for details. Any derivative work must be distributed under the same license.
+GPL v3. See [LICENSE](LICENSE).

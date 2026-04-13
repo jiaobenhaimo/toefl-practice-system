@@ -27,18 +27,24 @@ let isRecording = false;
 let isFinishing = false;    // Guard against double-triggering finishCurrentModule
 let audioPlaying = false;   // True while audio is playing (blocks Next in listening)
 let cachedMicStream = null; // Reuse mic stream across speaking questions
+let bookmarkedQuestions = new Set(); // Bookmarked question indices (reading only)
+let isPracticeMode = false;         // Practice mode: replay audio, instant feedback
+let studentName = '';               // Student name (from URL params)
+let studentId = '';                 // Student ID (from URL params)
+let questionTimes = {};             // { qid: seconds spent }
+let questionStartTime = 0;          // Date.now() when current question was shown
 let playedAudio = new Set();    // Track audio clips already played (for no-replay mode)
 
 /* ======= AUDIO CODEC DETECTION ======= */
 const AUDIO_TYPES = [
+    { mimeType: 'audio/ogg;codecs=opus', ext: 'ogg' },
+    { mimeType: 'audio/ogg', ext: 'ogg' },
     { mimeType: 'audio/webm;codecs=opus', ext: 'webm' },
     { mimeType: 'audio/webm', ext: 'webm' },
     { mimeType: 'audio/mp4', ext: 'm4a' },
-    { mimeType: 'audio/ogg;codecs=opus', ext: 'ogg' },
-    { mimeType: 'audio/ogg', ext: 'ogg' },
 ];
 let recordingMimeType = '';
-let recordingExt = 'webm';
+let recordingExt = 'ogg';
 (function detectCodec() {
     if (typeof MediaRecorder === 'undefined') return;
     for (const t of AUDIO_TYPES) {
@@ -53,8 +59,9 @@ let recordingExt = 'webm';
 /* ======= STORAGE ======= */
 function storageKey(suffix) {
     const mode = URL_PARAMS.mode || 'full';
+    const practice = isPracticeMode ? 'prac_' : '';
     const scope = mode === 'section' ? 'sec_' + (URL_PARAMS.section || '') : 'full';
-    return 'toefl_' + TEST_INFO.test_id + '_' + scope + '_' + suffix;
+    return 'toefl_' + TEST_INFO.test_id + '_' + practice + scope + '_' + suffix;
 }
 
 function moduleKey(mod) {
@@ -130,6 +137,12 @@ function showScreen(id) {
 document.addEventListener('DOMContentLoaded', () => {
     _activeScreen = document.querySelector('.screen--active');
     const mode = URL_PARAMS.mode || 'full';
+    isPracticeMode = URL_PARAMS.practice === 'true';
+    studentName = URL_PARAMS.student_name || '';
+    studentId = URL_PARAMS.student_id || '';
+
+    // Force English during test-taking (Chinese only in catalog)
+    window._lang = 'en';
 
     if (mode === 'section') {
         // Section mode - chain all modules of the chosen section
@@ -161,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const resumeIdx = saved.playlistIdx;
             // Validate: resumeIdx must be > 0 and within bounds
             if (resumeIdx > 0 && resumeIdx < playlist.length) {
-                if (confirm('Resume from where you left off?')) {
+                if (confirm(t('resumeConfirm'))) {
                     playlistIdx = resumeIdx;
                     allResults = Array.isArray(saved.allResults) ? saved.allResults : [];
                 }
@@ -222,19 +235,17 @@ async function loadAndStartModule() {
         playedAudio = new Set();
         isFinishing = false;
         audioPlaying = false;
+        bookmarkedQuestions = new Set();
+        questionTimes = {};
+        questionStartTime = 0;
         // Release mic if switching away from speaking
         if (cachedMicStream && currentModule.section !== 'speaking') {
             cachedMicStream.getTracks().forEach(t => t.stop());
             cachedMicStream = null;
         }
 
-        // UI
-        const sectionLabel = capitalize(currentModule.section);
-        let label = sectionLabel + ' — Module ' + currentModule.moduleNum;
-        if (playlist.length > 1) {
-            label = `[${playlistIdx + 1}/${playlist.length}] ` + label;
-        }
-        document.getElementById('section-label').textContent = label;
+        // UI — just the section name centered
+        document.getElementById('section-label').textContent = capitalize(currentModule.section);
 
         showScreen('screen-test');
         startTimer();
@@ -247,7 +258,7 @@ async function loadAndStartModule() {
 }
 
 async function exitModule() {
-    if (confirm('Save progress and exit? You can resume later.')) {
+    if (confirm(t('exitConfirm'))) {
         collectAnswer();
         saveModuleProgress();
         stopTimer();
@@ -337,23 +348,27 @@ function renderQuestion() {
     audioPlaying = false;
     setNextButtonEnabled(true);
 
-    document.getElementById('q-counter').textContent =
-        'Question ' + (currentPageIdx + 1) + ' / ' + total;
-
     // Prev button: only reading
     const btnPrev = document.getElementById('btn-prev');
     btnPrev.style.display = (section === 'reading' && currentPageIdx > 0) ? '' : 'none';
+
+    // Bookmark button: only reading
+    const btnBookmark = document.getElementById('btn-bookmark');
+    if (btnBookmark) {
+        btnBookmark.style.display = (section === 'reading') ? '' : 'none';
+        btnBookmark.classList.toggle('btn-bookmark--active', bookmarkedQuestions.has(currentPageIdx));
+    }
 
     // Next button text
     const btnNext = document.getElementById('btn-next');
     if (currentPageIdx === total - 1) {
         if (playlistIdx < playlist.length - 1) {
-            btnNext.textContent = 'Next Section →';
+            btnNext.textContent = t('nextSection');
         } else {
-            btnNext.textContent = 'Finish';
+            btnNext.textContent = t('finish');
         }
     } else {
-        btnNext.textContent = 'Next →';
+        btnNext.textContent = t('next');
     }
 
     // Render body
@@ -372,6 +387,17 @@ function renderQuestion() {
         case 'email': case 'discussion': renderFreeWrite(body, page); break;
         case 'listen_repeat': case 'interview': renderSpeaking(body, page); break;
     }
+
+    updateProgressDots();
+    questionStartTime = Date.now();
+}
+
+function recordQuestionTime() {
+    if (!currentModule || !questionStartTime) return;
+    const qid = currentModule.pages[currentPageIdx].question_id;
+    const elapsed = Math.round((Date.now() - questionStartTime) / 1000);
+    questionTimes[qid] = (questionTimes[qid] || 0) + elapsed;
+    questionStartTime = 0;
 }
 
 let _navigating = false;
@@ -380,12 +406,25 @@ async function nextQuestion() {
     if (_navigating || audioPlaying) return;
     _navigating = true;
     try {
+        recordQuestionTime();
         collectAnswer();
         saveModuleProgress();
         await stopRecording();
         stopQuestionTimer();
 
         if (currentPageIdx >= currentModule.pages.length - 1) {
+            // Confirm if student still has time left
+            if (timerSecondsLeft > 0) {
+                const mins = Math.ceil(timerSecondsLeft / 60);
+                const section = capitalize(currentModule.section);
+                const canGoBack = currentModule.section === 'reading';
+                let msg = t('timeLeftConfirm').replace('{n}', mins).replace('{section}', section);
+                if (canGoBack) msg += ' ' + t('canReview');
+                msg += '\n\n' + t('finishConfirm');
+                if (!confirm(msg)) {
+                    return;
+                }
+            }
             await finishCurrentModule();
             return;
         }
@@ -398,6 +437,7 @@ async function nextQuestion() {
 
 function prevQuestion() {
     if (_navigating) return;
+    recordQuestionTime();
     collectAnswer();
     saveModuleProgress();
     if (currentPageIdx > 0) {
@@ -443,6 +483,49 @@ function collectAnswer() {
             break;
         }
     }
+}
+
+function updateProgressDots() {
+    const container = document.getElementById('progress-dots');
+    const counter = document.getElementById('progress-counter');
+    if (!container || !currentModule) return;
+    const total = currentModule.pages.length;
+
+    // Update counter
+    if (counter) counter.textContent = (currentPageIdx + 1) + ' / ' + total;
+
+    // Build dots if needed
+    if (container.children.length !== total) {
+        container.innerHTML = '';
+        for (let i = 0; i < total; i++) {
+            const dot = document.createElement('span');
+            dot.className = 'progress-dot';
+            dot.setAttribute('aria-label', 'Question ' + (i + 1));
+            container.appendChild(dot);
+        }
+    }
+
+    // Update state
+    for (let i = 0; i < total; i++) {
+        const dot = container.children[i];
+        const qid = currentModule.pages[i].question_id;
+        const isAnswered = answers[qid] !== undefined && answers[qid] !== '' &&
+            !(Array.isArray(answers[qid]) && answers[qid].every(v => v === ''));
+        dot.classList.toggle('progress-dot--answered', isAnswered);
+        dot.classList.toggle('progress-dot--current', i === currentPageIdx);
+        dot.classList.toggle('progress-dot--bookmarked', bookmarkedQuestions.has(i));
+    }
+}
+
+function toggleBookmark() {
+    if (bookmarkedQuestions.has(currentPageIdx)) {
+        bookmarkedQuestions.delete(currentPageIdx);
+    } else {
+        bookmarkedQuestions.add(currentPageIdx);
+    }
+    const btn = document.getElementById('btn-bookmark');
+    if (btn) btn.classList.toggle('btn-bookmark--active', bookmarkedQuestions.has(currentPageIdx));
+    updateProgressDots();
 }
 
 /* ======= RENDERERS ======= */
@@ -521,16 +604,32 @@ function renderMC(body, page) {
 
 function buildChoices(page) {
     const choicesEl = el('div', 'choices');
+    choicesEl.setAttribute('role', 'radiogroup');
+    choicesEl.setAttribute('aria-label', 'Answer choices');
     const saved = answers[page.question_id] || '';
     for (const [letter, text] of Object.entries(page.choices)) {
         const label = document.createElement('label');
         label.className = 'choice' + (saved === letter ? ' choice--selected' : '');
+        label.setAttribute('data-letter', letter);
         const radio = document.createElement('input');
         radio.type = 'radio'; radio.name = 'mc-answer'; radio.value = letter;
+        radio.setAttribute('aria-label', 'Option ' + letter + ': ' + text);
         if (saved === letter) radio.checked = true;
         radio.addEventListener('change', () => {
             choicesEl.querySelectorAll('.choice--selected').forEach(c => c.classList.remove('choice--selected'));
             label.classList.add('choice--selected');
+            // Practice mode: instant feedback
+            if (isPracticeMode && page.answer) {
+                choicesEl.querySelectorAll('.choice').forEach(c => {
+                    c.classList.remove('choice--correct', 'choice--wrong');
+                    const l = c.getAttribute('data-letter');
+                    if (l === page.answer) c.classList.add('choice--correct');
+                    else if (l === letter) c.classList.add('choice--wrong');
+                    // Disable further changes
+                    c.querySelector('input').disabled = true;
+                    c.style.pointerEvents = 'none';
+                });
+            }
         });
         label.appendChild(radio);
         label.appendChild(el('span', 'choice__text', escapeHtml(text)));
@@ -555,7 +654,8 @@ function renderCloze(body, page) {
             const charVal = savedVal[c] || '';
             inputs += '<input type="text" maxlength="1" class="cloze-char" ' +
                 'data-blank="' + idx + '" data-pos="' + c + '" data-count="' + count + '" ' +
-                'value="' + escapeHtml(charVal) + '" autocomplete="off" autocapitalize="off" spellcheck="false">';
+                'value="' + escapeHtml(charVal) + '" autocomplete="off" autocapitalize="off" spellcheck="false" ' +
+                'aria-label="Blank ' + (idx + 1) + ', letter ' + (c + 1) + ' of ' + count + '">';
         }
         const result = '<span class="cloze-group" data-idx="' + idx + '">' +
             escapeHtml(prefix) +
@@ -569,7 +669,7 @@ function renderCloze(body, page) {
     const p = el('div', 'passage-panel passage-panel--cloze');
     p.innerHTML = html;
     body.appendChild(p);
-    body.appendChild(el('div', 'cloze-hint', 'Fill in all ' + idx + ' blanks, then click Next.'));
+    body.appendChild(el('div', 'cloze-hint', t('fillBlanks').replace('{n}', idx)));
 
     // Wire up auto-advance behavior
     const allChars = Array.from(p.querySelectorAll('.cloze-char'));
@@ -691,125 +791,84 @@ function renderFreeWrite(body, page) {
         body.appendChild(c);
     }
     if (page.time_minutes) {
-        body.appendChild(el('div', 'write-time-hint', 'Suggested time: ' + page.time_minutes + ' minutes'));
+        body.appendChild(el('div', 'write-time-hint', t('suggestedTime').replace('{n}', page.time_minutes)));
     }
     const ta = document.createElement('textarea');
     ta.id = 'free-write-area'; ta.className = 'free-write-area';
-    ta.placeholder = 'Type your response here...'; ta.rows = 14;
+    ta.placeholder = t('typeResponse'); ta.rows = 14;
     ta.value = answers[page.question_id] || '';
     body.appendChild(ta);
-    const wc = el('div', 'word-count', '0 words');
+    const wc = el('div', 'word-count', '0 ' + t('words'));
     body.appendChild(wc);
     ta.addEventListener('input', () => {
         const count = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
-        wc.textContent = count + ' words';
+        wc.textContent = count + ' ' + t('words');
     });
     ta.dispatchEvent(new Event('input'));
 }
 
 function renderSpeaking(body, page) {
-    body.appendChild(el('div', 'speak-instruction', page.content || 'Listen and respond.'));
+    body.appendChild(el('div', 'speak-instruction', page.content || t('listenRespond')));
 
     const statusArea = el('div', 'speak-status'); statusArea.id = 'speak-status';
-    const waveCanvas = document.createElement('canvas');
-    waveCanvas.className = 'waveform-canvas';
-    waveCanvas.width = 600; waveCanvas.height = 80;
-    waveCanvas.style.display = 'none'; // Hidden until recording starts
+    const meterWrap = el('div', 'level-meter');
+    meterWrap.style.display = 'none';
+    meterWrap.setAttribute('aria-label', 'Microphone input level');
+    const meterFill = el('div', 'level-meter__fill');
+    meterWrap.appendChild(meterFill);
     const timerWrap = el('div', 'q-timer-wrap');
     timerWrap.innerHTML = '<div class="q-timer-track"><div class="q-timer-bar" id="q-timer-bar"></div></div>' +
         '<span class="q-timer-label" id="q-timer-label">--</span>';
-    const playback = el('div', 'rec-playback'); playback.id = 'rec-playback';
 
-    let waveformAnimId = null;
+    let meterAnimId = null;
     let analyser = null;
-    let waveAudioCtx = null;
+    let meterAudioCtx = null;
 
-    function startWaveform(stream) {
+    function startMeter(stream) {
         try {
-            // Match canvas pixel size to display size for sharp rendering
-            const dpr = window.devicePixelRatio || 1;
-            const rect = waveCanvas.getBoundingClientRect();
-            const displayW = rect.width || 600;
-            const displayH = 80;
-            waveCanvas.width = Math.round(displayW * dpr);
-            waveCanvas.height = Math.round(displayH * dpr);
-            const ctx2d = waveCanvas.getContext('2d');
-            ctx2d.scale(dpr, dpr);
-
-            waveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const source = waveAudioCtx.createMediaStreamSource(stream);
-            analyser = waveAudioCtx.createAnalyser();
-            analyser.fftSize = 128;
+            meterAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = meterAudioCtx.createMediaStreamSource(stream);
+            analyser = meterAudioCtx.createAnalyser();
+            analyser.fftSize = 256;
             source.connect(analyser);
-            waveCanvas.style.display = '';
-            drawWaveform();
-        } catch (e) {
-            // Web Audio API not available — skip visualization
-        }
-    }
-
-    function drawWaveform() {
-        if (!analyser) return;
-        const bufLen = analyser.frequencyBinCount;
-        const data = new Uint8Array(bufLen);
-        const ctx = waveCanvas.getContext('2d');
-        // Use CSS display size (scale is already applied)
-        const dpr = window.devicePixelRatio || 1;
-        const W = waveCanvas.width / dpr;
-        const H = waveCanvas.height / dpr;
-        const barCount = 32;
-        const gap = 3;
-        const barW = (W - (barCount - 1) * gap) / barCount;
-        const step = Math.floor(bufLen / barCount);
-
-        function draw() {
-            waveformAnimId = requestAnimationFrame(draw);
-            analyser.getByteFrequencyData(data);
-            ctx.clearRect(0, 0, W, H);
-
-            for (let i = 0; i < barCount; i++) {
-                // Average a few bins for this bar
+            meterWrap.style.display = '';
+            const data = new Uint8Array(analyser.fftSize);
+            function draw() {
+                meterAnimId = requestAnimationFrame(draw);
+                analyser.getByteTimeDomainData(data);
+                // Compute RMS volume
                 let sum = 0;
-                for (let j = 0; j < step; j++) {
-                    sum += data[i * step + j] || 0;
+                for (let i = 0; i < data.length; i++) {
+                    const v = (data[i] - 128) / 128;
+                    sum += v * v;
                 }
-                const avg = sum / step;
-                const barH = Math.max(3, (avg / 255) * H);
-                const x = i * (barW + gap);
-                const y = (H - barH) / 2;
-
-                // Gradient from accent color (quiet) to green (loud)
-                const intensity = avg / 255;
-                const r = Math.round(59 + intensity * (26 - 59));
-                const g = Math.round(111 + intensity * (159 - 111));
-                const b = Math.round(224 + intensity * (92 - 224));
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
-                // Rounded bar (with fillRect fallback)
-                if (ctx.roundRect) {
-                    ctx.beginPath();
-                    ctx.roundRect(x, y, barW, barH, 2);
-                    ctx.fill();
+                const rms = Math.sqrt(sum / data.length);
+                const pct = Math.min(100, rms * 400); // Scale for visibility
+                meterFill.style.width = pct + '%';
+                // Color: green when loud, accent when quiet
+                if (pct > 50) {
+                    meterFill.classList.add('level-meter__fill--active');
                 } else {
-                    ctx.fillRect(x, y, barW, barH);
+                    meterFill.classList.remove('level-meter__fill--active');
                 }
             }
+            draw();
+        } catch (e) {
+            // Web Audio API not available
         }
-        draw();
     }
 
-    function stopWaveform() {
-        if (waveformAnimId) {
-            cancelAnimationFrame(waveformAnimId);
-            waveformAnimId = null;
+    function stopMeter() {
+        if (meterAnimId) {
+            cancelAnimationFrame(meterAnimId);
+            meterAnimId = null;
         }
         analyser = null;
-        if (waveAudioCtx) {
-            waveAudioCtx.close().catch(() => {});
-            waveAudioCtx = null;
+        if (meterAudioCtx) {
+            meterAudioCtx.close().catch(() => {});
+            meterAudioCtx = null;
         }
-        const ctx = waveCanvas.getContext('2d');
-        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset scale
-        ctx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);
+        meterFill.style.width = '0%';
     }
 
     // Hide Next button — speaking auto-advances
@@ -827,18 +886,18 @@ function renderSpeaking(body, page) {
     }
 
     async function startAutoRecord() {
-        statusArea.textContent = 'Recording in 3...';
+        statusArea.textContent = t('recordIn3');
         await sleep(1000);
         if (!currentModule) return;
-        statusArea.textContent = 'Recording in 2...';
+        statusArea.textContent = t('recordIn2');
         await sleep(1000);
         if (!currentModule) return;
-        statusArea.textContent = 'Recording in 1...';
+        statusArea.textContent = t('recordIn1');
         await sleep(1000);
         if (!currentModule) return;
 
         if (!recordingMimeType) {
-            statusArea.textContent = 'Recording not supported in this browser.';
+            statusArea.textContent = t('recNotSupported');
             setNextButtonEnabled(true);
             return;
         }
@@ -853,23 +912,23 @@ function renderSpeaking(body, page) {
                 recordings[page.question_id] = blob;
                 answers[page.question_id] = '[audio recorded]';
                 isRecording = false;
-                stopWaveform();
-                statusArea.textContent = 'Recording saved.';
+                stopMeter();
+                statusArea.textContent = t('recordSaved');
                 if (currentModule && !isFinishing) nextQuestion();
             };
             mediaRecorder.start();
             isRecording = true;
-            statusArea.textContent = 'Recording...';
-            startWaveform(stream);
+            statusArea.textContent = t('recording');
+            startMeter(stream);
             const duration = page.time_seconds ?? 30;
             startQuestionTimer(duration, () => {
                 if (isRecording) {
-                    stopWaveform();
+                    stopMeter();
                     stopRecordingAndSave();
                 }
             });
         } catch (err) {
-            statusArea.textContent = 'Microphone access denied. Click Next to skip.';
+            statusArea.textContent = t('micDenied');
             setNextButtonEnabled(true);
         }
     }
@@ -883,9 +942,8 @@ function renderSpeaking(body, page) {
     }
 
     body.appendChild(statusArea);
-    body.appendChild(waveCanvas);
+    body.appendChild(meterWrap);
     body.appendChild(timerWrap);
-    body.appendChild(playback);
 }
 
 function sleep(ms) {
@@ -934,18 +992,6 @@ function stopRecording() {
     return _pendingStop;
 }
 
-function showPlayback(container, blob) {
-    // Revoke previous object URL to prevent memory leak
-    const prevAudio = container.querySelector('audio');
-    if (prevAudio && prevAudio.src.startsWith('blob:')) {
-        URL.revokeObjectURL(prevAudio.src);
-    }
-    container.innerHTML = '';
-    const audio = document.createElement('audio');
-    audio.controls = true; audio.src = URL.createObjectURL(blob);
-    container.appendChild(audio);
-}
-
 function setNextButtonEnabled(enabled) {
     const btn = document.getElementById('btn-next');
     if (!btn) return;
@@ -956,15 +1002,32 @@ function setNextButtonEnabled(enabled) {
 function createAudioPlayer(src, options) {
     const opts = options || {};
     const onEnded = opts.onEnded;
-    const lockNext = opts.lockNext || false;
-    const lockEl = opts.lockEl || null;        // Element to disable during playback (e.g. choices)
+    const lockNext = isPracticeMode ? false : (opts.lockNext || false);
+    const lockEl = isPracticeMode ? null : (opts.lockEl || null);
     const wrap = el('div', 'audio-player');
     const note = el('div', 'audio-note', '');
     wrap.appendChild(note);
 
-    // Already played — show disabled state, no audio element
+    // Practice mode: normal replayable audio
+    if (isPracticeMode) {
+        const audioEl = document.createElement('audio');
+        audioEl.preload = 'auto';
+        audioEl.src = '/audio/' + currentModule.audioDir + '/' + src + '.ogg';
+        audioEl.controls = true;
+        note.textContent = src + '.ogg';
+        wrap.appendChild(audioEl);
+        audioEl.addEventListener('ended', () => { if (onEnded) onEnded(); });
+        audioEl.addEventListener('error', () => {
+            note.innerHTML = t('audioNotFound') + ': <code>' + src + '.ogg</code>';
+            note.classList.add('audio-note--error');
+            if (onEnded) onEnded();
+        });
+        return wrap;
+    }
+
+    // Test mode: already played — show disabled state
     if (playedAudio.has(src)) {
-        note.textContent = 'Audio already played';
+        note.textContent = t('audioAlreadyPlayed');
         note.className = 'audio-note audio-note--played';
         if (onEnded) onEnded();
         return wrap;
@@ -989,7 +1052,7 @@ function createAudioPlayer(src, options) {
     });
 
     audioEl.addEventListener('ended', () => {
-        note.textContent = 'Audio played (no replay)';
+        note.textContent = t('audioPlayed');
         note.className = 'audio-note audio-note--played';
         audioEl.remove();
         progressWrap.remove();
@@ -1015,14 +1078,16 @@ function createAudioPlayer(src, options) {
     }
     if (lockEl) lockEl.classList.add('choices--locked');
 
-    note.textContent = 'Loading audio...';
+    note.textContent = t('loadingAudio');
+
+    const volumeHtml = '<span class="audio-volume"><span class="audio-volume__bar"></span><span class="audio-volume__bar"></span><span class="audio-volume__bar"></span></span>';
 
     // Wait for enough data to play smoothly, then start
     let _playbackStarted = false;
     function startPlayback() {
         if (_playbackStarted) return;
         _playbackStarted = true;
-        note.textContent = 'Playing...';
+        note.innerHTML = t('playing') + volumeHtml;
         audioPlaying = true;
         playedAudio.add(src);
         const playPromise = audioEl.play();
@@ -1041,7 +1106,7 @@ function createAudioPlayer(src, options) {
                     if (lockEl) lockEl.classList.add('choices--locked');
                     audioEl.play();
                     playBtn.remove();
-                    note.textContent = 'Playing...';
+                    note.innerHTML = t('playing') + volumeHtml;
                     progressWrap.style.display = '';
                 }, { once: true });
                 note.appendChild(playBtn);
@@ -1074,12 +1139,36 @@ async function finishCurrentModule() {
     await stopRecording();
     stopQuestionTimer();
 
-    // Grade this module and store results
-    const result = gradeModule(currentModule, answers, recordings);
+    // Record time for current question before grading
+    recordQuestionTime();
+
+    // Server-side grading
+    const mod = playlist[playlistIdx];
+    let result;
+    try {
+        const gradeResp = await fetch('/api/grade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: mod.filename,
+                module_index: mod.module_index,
+                answers: answers,
+                times: questionTimes,
+            }),
+        });
+        result = await gradeResp.json();
+    } catch (e) {
+        // Fallback to client-side grading if server unreachable
+        result = gradeModule(currentModule, answers, recordings, questionTimes);
+    }
+    // Attach recordings for zip download (not sent to server)
+    result.recordings = { ...recordings };
+    result.hasDownloadable = Object.keys(recordings).length > 0 ||
+        currentModule.pages.some(p => ['email','discussion'].includes(p.question_type));
+    result.answers = { ...answers };
     allResults.push(result);
 
     // Mark complete, clear per-module progress
-    const mod = playlist[playlistIdx];
     markModuleComplete(mod);
     localStorage.removeItem(storageKey('mod_' + moduleKey(mod)));
 
@@ -1099,9 +1188,9 @@ async function finishCurrentModule() {
             // Different section — show transition screen
             const doneSec = capitalize(result.section);
             const nextSec = capitalize(nextMod.section);
-            document.getElementById('transition-done').textContent = doneSec + ' complete';
-            document.getElementById('transition-next').textContent =
-                'Next: ' + nextSec + ' — Module ' + nextMod.module + ' (' + nextMod.timer_minutes + ' min)';
+            document.getElementById('transition-done').textContent = doneSec + ' ' + t('complete');
+            document.getElementById('transition-section').textContent = nextSec;
+            document.getElementById('transition-badge').textContent = nextMod.timer_minutes + ' min';
             showScreen('screen-transition');
         }
     } else {
@@ -1111,22 +1200,24 @@ async function finishCurrentModule() {
 }
 
 /* ======= GRADING ======= */
-function gradeModule(mod, ans, recs) {
+function gradeModule(mod, ans, recs, times) {
     const section = mod.section;
     const pages = mod.pages;
     let correct = 0, total = 0;
     const details = [];
     let hasDownloadable = false;
+    const qTimes = times || {};
 
     pages.forEach(page => {
         const qid = page.question_id;
         const userAns = ans[qid];
+        const timeSpent = qTimes[qid] || 0;
 
         if (page.question_type === 'mc') {
             total++;
             const ok = userAns === page.answer;
             if (ok) correct++;
-            details.push({ qid, type: 'mc', correct: ok, user: userAns || '—', expected: page.answer });
+            details.push({ qid, type: 'mc', correct: ok, user: userAns || '—', expected: page.answer, time: timeSpent });
         } else if (page.question_type === 'cloze') {
             const fills = page.cloze_fills || page.cloze_answers || [];
             const fullWords = page.cloze_answers || [];
@@ -1141,6 +1232,7 @@ function gradeModule(mod, ans, recs) {
                     user: uv || '—',
                     expected: expected_fill,
                     fullWord: fullWords[i] || expected_fill,
+                    time: i === 0 ? timeSpent : 0,
                 });
             });
         } else if (page.question_type === 'build_sentence') {
@@ -1149,14 +1241,14 @@ function gradeModule(mod, ans, recs) {
             const usr = (userAns || '').trim().toLowerCase().replace(/[?!.]/g, '');
             const ok = usr === exp;
             if (ok) correct++;
-            details.push({ qid, type: 'build_sentence', correct: ok, user: userAns || '—', expected: page.answer });
+            details.push({ qid, type: 'build_sentence', correct: ok, user: userAns || '—', expected: page.answer, time: timeSpent });
         } else if (page.question_type === 'email' || page.question_type === 'discussion') {
             hasDownloadable = true;
             const wc = (userAns || '').trim().split(/\s+/).filter(Boolean).length;
-            details.push({ qid, type: page.question_type, user: userAns, wordCount: wc });
+            details.push({ qid, type: page.question_type, user: userAns, wordCount: wc, time: timeSpent });
         } else if (page.question_type === 'listen_repeat' || page.question_type === 'interview') {
             hasDownloadable = true;
-            details.push({ qid, type: page.question_type, hasRecording: !!recs[qid] });
+            details.push({ qid, type: page.question_type, hasRecording: !!recs[qid], time: timeSpent });
         }
     });
 
@@ -1171,11 +1263,13 @@ function gradeModule(mod, ans, recs) {
 }
 
 /* ======= FINAL RESULTS SCREEN ======= */
-function showFinalResults() {
+async function showFinalResults() {
     showScreen('screen-results');
 
     const isFull = playlist.length > 1;
-    document.getElementById('results-title').textContent = isFull ? 'Full Test Results' : 'Results';
+    let titleText = isFull ? t('fullTestResults') : t('results');
+    if (isPracticeMode) titleText = t('practiceResults');
+    document.getElementById('results-title').textContent = titleText;
 
     let html = '';
     let totalCorrect = 0, totalQuestions = 0;
@@ -1198,38 +1292,41 @@ function showFinalResults() {
 
         html += '<div class="results-list">';
         result.details.forEach(d => {
+            const checkSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M4 9l3.5 3.5L14 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            const crossSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M5 5l8 8M13 5l-8 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
+            const timeLabel = d.time ? '<span class="result-row__time">' + d.time + 's</span>' : '';
+
             if (d.type === 'mc' || d.type === 'build_sentence') {
                 const cls = d.correct ? 'result-row--correct' : 'result-row--wrong';
-                const icon = d.correct ? 'OK' : 'X';
                 html += '<div class="result-row ' + cls + '">';
                 html += '<span class="result-row__q">Q' + d.qid + '</span>';
-                html += '<span class="result-row__icon">' + icon + '</span>';
-                html += '<span class="result-row__detail">Your answer: <strong>' + escapeHtml(String(d.user)) + '</strong>';
-                if (!d.correct) html += ' | Correct: <strong>' + escapeHtml(d.expected) + '</strong>';
-                html += '</span></div>';
+                html += '<span class="result-row__icon">' + (d.correct ? checkSvg : crossSvg) + '</span>';
+                html += '<span class="result-row__ans">' + escapeHtml(String(d.user)) + '</span>';
+                html += '<span class="result-row__correct">' + escapeHtml(d.expected) + '</span>';
+                html += timeLabel + '</div>';
             } else if (d.type === 'cloze') {
                 const cls = d.correct ? 'result-row--correct' : 'result-row--wrong';
-                const icon = d.correct ? 'OK' : 'X';
                 html += '<div class="result-row ' + cls + '">';
                 html += '<span class="result-row__q">' + d.qid + '</span>';
-                html += '<span class="result-row__icon">' + icon + '</span>';
-                html += '<span class="result-row__detail">';
-                html += 'You wrote: <strong>' + escapeHtml(String(d.user)) + '</strong>';
-                if (!d.correct) html += ' | Answer: <strong>' + escapeHtml(d.fullWord || d.expected) + '</strong>';
-                else html += ' (' + escapeHtml(d.fullWord || '') + ')';
-                html += '</span></div>';
+                html += '<span class="result-row__icon">' + (d.correct ? checkSvg : crossSvg) + '</span>';
+                html += '<span class="result-row__ans">' + escapeHtml(String(d.user)) + '</span>';
+                html += '<span class="result-row__correct">' + escapeHtml(d.fullWord || d.expected) + '</span>';
+                html += timeLabel + '</div>';
             } else if (d.type === 'email' || d.type === 'discussion') {
+                const pencilSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M11.5 3.5l3 3L6 15H3v-3L11.5 3.5z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>';
                 html += '<div class="result-row result-row--neutral">';
                 html += '<span class="result-row__q">Q' + d.qid + '</span>';
-                html += '<span class="result-row__icon">W</span>';
+                html += '<span class="result-row__icon">' + pencilSvg + '</span>';
                 html += '<span class="result-row__detail">' + capitalize(d.type) +
-                         ' — ' + d.wordCount + ' words</span></div>';
+                         ' — ' + d.wordCount + ' words</span>' + timeLabel + '</div>';
             } else if (d.type === 'listen_repeat' || d.type === 'interview') {
+                const micSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><rect x="6" y="2" width="6" height="9" rx="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 9a5 5 0 0010 0M9 14v2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>';
+                const noMicSvg = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M3 3l12 12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><rect x="6" y="2" width="6" height="9" rx="3" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.4"/></svg>';
                 const cls = d.hasRecording ? 'result-row--neutral' : 'result-row--wrong';
                 html += '<div class="result-row ' + cls + '">';
                 html += '<span class="result-row__q">Q' + d.qid + '</span>';
-                html += '<span class="result-row__icon">' + (d.hasRecording ? 'S' : '—') + '</span>';
-                html += '<span class="result-row__detail">' + (d.hasRecording ? 'Audio recorded' : 'No recording') + '</span></div>';
+                html += '<span class="result-row__icon">' + (d.hasRecording ? micSvg : noMicSvg) + '</span>';
+                html += '<span class="result-row__detail">' + (d.hasRecording ? 'Audio recorded' : 'No recording') + '</span>' + timeLabel + '</div>';
             }
         });
         html += '</div></div>';
@@ -1247,20 +1344,49 @@ function showFinalResults() {
             '<div class="results-score__pct">Overall: ' + pct + '%</div></div></div>';
     }
 
-    document.getElementById('results-body').innerHTML = overallHtml + html;
+    let practiceBadge = '';
+    if (isPracticeMode) {
+        practiceBadge = '<div style="text-align:center;margin-bottom:20px"><span class="practice-badge">' + t('practiceLabel') + '</span></div>';
+    }
+
+    document.getElementById('results-body').innerHTML = practiceBadge + overallHtml + html;
 
     // Actions
     const actionsEl = document.getElementById('results-actions');
     actionsEl.innerHTML = '';
-    const backBtn = el('a', 'btn btn--primary', '← Back to Catalog');
+    const backBtn = el('a', 'btn btn--primary', t('backToCatalog'));
     backBtn.href = '/';
     actionsEl.appendChild(backBtn);
 
     if (anyDownloadable) {
-        const dlBtn = el('button', 'btn btn--secondary', 'Download Answers (.zip)');
+        const dlBtn = el('button', 'btn btn--secondary', t('downloadZip'));
         dlBtn.addEventListener('click', downloadFullZip);
         actionsEl.appendChild(dlBtn);
     }
+
+    // PDF export button
+    const pdfBtn = el('button', 'btn btn--secondary', t('exportPdf'));
+    pdfBtn.addEventListener('click', exportPdf);
+    actionsEl.appendChild(pdfBtn);
+
+    // Save results to server (for logged-in users)
+    try {
+        await fetch('/api/save-results', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                test_id: TEST_INFO.test_id,
+                test_name: TEST_INFO.test_name,
+                practice: isPracticeMode,
+                total_correct: totalCorrect,
+                total_questions: totalQuestions,
+                sections: allResults.map(r => ({
+                    section: r.section, moduleNum: r.moduleNum,
+                    score: r.score, details: r.details,
+                })),
+            }),
+        });
+    } catch (e) {}
 }
 
 /* ======= ZIP DOWNLOAD ======= */
@@ -1274,6 +1400,9 @@ async function downloadFullZip() {
 
         // Text answers
         let txt = 'Test: ' + TEST_INFO.test_name + '\n';
+        if (studentName) txt += 'Student: ' + studentName + '\n';
+        if (studentId) txt += 'ID: ' + studentId + '\n';
+        if (isPracticeMode) txt += 'Mode: PRACTICE\n';
         txt += 'Section: ' + result.section + '\nModule: ' + result.moduleNum + '\n';
         txt += 'Date: ' + new Date().toISOString() + '\n';
         if (result.score.total > 0) {
@@ -1282,7 +1411,9 @@ async function downloadFullZip() {
         txt += '\n';
 
         result.details.forEach(d => {
-            txt += '--- Question ' + d.qid + ' (' + d.type + ') ---\n';
+            txt += '--- Question ' + d.qid + ' (' + d.type + ')';
+            if (d.time) txt += ' [' + d.time + 's]';
+            txt += ' ---\n';
             if (d.type === 'email' || d.type === 'discussion') {
                 txt += (d.user || '[no answer]') + '\n';
             } else if (d.type === 'listen_repeat' || d.type === 'interview') {
@@ -1306,7 +1437,46 @@ async function downloadFullZip() {
     });
 
     const content = await zip.generateAsync({ type: 'blob' });
-    saveAs(content, TEST_INFO.test_id + '_answers.zip');
+    const prefix = isPracticeMode ? 'practice_' : '';
+    saveAs(content, prefix + TEST_INFO.test_id + '_answers.zip');
+}
+
+async function exportPdf() {
+    const data = {
+        test_name: TEST_INFO.test_name,
+        test_id: TEST_INFO.test_id,
+        practice: isPracticeMode,
+        student_name: studentName,
+        student_id: studentId,
+        lang: window._lang || 'en',
+        date: new Date().toISOString(),
+        results: allResults.map(r => ({
+            section: r.section, moduleNum: r.moduleNum,
+            score: r.score,
+            details: r.details.map(d => ({
+                qid: d.qid, type: d.type, correct: d.correct,
+                user: String(d.user || ''), expected: d.expected || '',
+                fullWord: d.fullWord || '', wordCount: d.wordCount,
+                hasRecording: d.hasRecording, time: d.time || 0,
+            })),
+        })),
+    };
+    try {
+        const resp = await fetch('/api/export-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (resp.ok) {
+            const blob = await resp.blob();
+            const prefix = isPracticeMode ? 'practice_' : '';
+            saveAs(blob, prefix + TEST_INFO.test_id + '_results.pdf');
+        } else {
+            alert('PDF export failed: ' + resp.status);
+        }
+    } catch (e) {
+        alert('PDF export failed: ' + e.message);
+    }
 }
 
 /* ======= KEYBOARD SHORTCUTS ======= */

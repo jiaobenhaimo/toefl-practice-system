@@ -4,11 +4,174 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}TOEFL Practice{% endblock %}</title>
+    <script>
+    // Apply stored theme immediately to prevent flash
+    (function() {
+        const stored = localStorage.getItem('theme');
+        if (stored) document.documentElement.setAttribute('data-theme', stored);
+    })();
+    </script>
+    <script>
+    // ===== i18n =====
+    const I18N = {
+        en: {
+            takeFullTest: 'Take Full Test',
+            fullTestDesc: 'All sections in order',
+            chooseSection: 'Or choose a section:',
+            clearProgress: 'Clear Saved Progress',
+            clearConfirm: 'Clear all saved progress for this test?',
+            cleared: 'Progress cleared.',
+            practiceMode: 'Practice',
+            minutes: 'minutes',
+            modules: 'modules',
+            loading: 'Loading test...',
+            next: 'Next',
+            previous: 'Previous',
+            finish: 'Finish',
+            nextSection: 'Next Section',
+            continue_: 'Continue',
+            upNext: 'Up next',
+            complete: 'complete',
+            results: 'Results',
+            fullTestResults: 'Full Test Results',
+            practiceResults: 'Practice Mode Results',
+            backToCatalog: 'Back to Catalog',
+            downloadZip: 'Download Answers (.zip)',
+            exportPdf: 'Export PDF',
+            playing: 'Playing...',
+            loadingAudio: 'Loading audio...',
+            audioPlayed: 'Audio played (no replay)',
+            audioAlreadyPlayed: 'Audio already played',
+            audioNotFound: 'Audio file not found',
+            clickToPlay: 'Click to Play Audio',
+            recordIn3: 'Recording in 3...',
+            recordIn2: 'Recording in 2...',
+            recordIn1: 'Recording in 1...',
+            recording: 'Recording...',
+            recordSaved: 'Recording saved.',
+            micDenied: 'Microphone access denied. Click Next to skip.',
+            recNotSupported: 'Recording not supported in this browser.',
+            listenRespond: 'Listen and respond.',
+            fillBlanks: 'Fill in all {n} blanks, then click Next.',
+            tapWords: 'Tap words in order to build the sentence. Tap a placed word to remove it.',
+            typeResponse: 'Type your response here...',
+            suggestedTime: 'Suggested time: {n} minutes',
+            words: 'words',
+            exitConfirm: 'Save progress and exit? You can resume later.',
+            resumeConfirm: 'Resume from where you left off?',
+            timeLeftConfirm: 'You still have about {n} minute(s) remaining in {section}.',
+            canReview: 'You can go back and review your answers.',
+            finishConfirm: 'Are you sure you want to finish this section?',
+            audioRecorded: 'Audio recorded',
+            noRecording: 'No recording',
+            practiceLabel: 'PRACTICE',
+            correct: 'Correct!',
+            incorrect: 'Incorrect',
+            correctAnswer: 'Correct answer: {a}',
+        },
+        zh: {
+            takeFullTest: '完整考试',
+            fullTestDesc: '按顺序完成所有部分',
+            chooseSection: '或选择一个部分：',
+            clearProgress: '清除已保存的进度',
+            clearConfirm: '确定要清除该试卷所有已保存的进度吗？',
+            cleared: '进度已清除。',
+            practiceMode: '练习',
+            minutes: '分钟',
+            modules: '个模块',
+            loading: '正在加载试卷...',
+            next: '下一题',
+            previous: '上一题',
+            finish: '完成',
+            nextSection: '下一部分',
+            continue_: '继续',
+            upNext: '下一部分',
+            complete: '已完成',
+            results: '成绩',
+            fullTestResults: '完整考试成绩',
+            practiceResults: '练习模式成绩',
+            backToCatalog: '返回目录',
+            downloadZip: '下载答案 (.zip)',
+            exportPdf: '导出 PDF',
+            playing: '正在播放...',
+            loadingAudio: '正在加载音频...',
+            audioPlayed: '音频已播放（不可重播）',
+            audioAlreadyPlayed: '音频已播放',
+            audioNotFound: '未找到音频文件',
+            clickToPlay: '点击播放音频',
+            recordIn3: '录音倒计时 3...',
+            recordIn2: '录音倒计时 2...',
+            recordIn1: '录音倒计时 1...',
+            recording: '正在录音...',
+            recordSaved: '录音已保存。',
+            micDenied: '麦克风权限被拒绝。点击"下一题"跳过。',
+            recNotSupported: '此浏览器不支持录音。',
+            listenRespond: '听音频并回答。',
+            fillBlanks: '填写所有 {n} 个空格，然后点击"下一题"。',
+            tapWords: '按顺序点击单词组成句子。点击已放置的单词将其移除。',
+            typeResponse: '在此输入你的回答...',
+            suggestedTime: '建议用时：{n} 分钟',
+            words: '字',
+            exitConfirm: '保存进度并退出？下次可以继续。',
+            resumeConfirm: '是否从上次中断的地方继续？',
+            timeLeftConfirm: '你在{section}部分还剩约 {n} 分钟。',
+            canReview: '你可以返回检查答案。',
+            finishConfirm: '确定要完成这个部分吗？',
+            audioRecorded: '已录音',
+            noRecording: '未录音',
+            practiceLabel: '练习模式',
+            correct: '正确！',
+            incorrect: '错误',
+            correctAnswer: '正确答案：{a}',
+        }
+    };
+    // Detect language
+    (function() {
+        const stored = localStorage.getItem('lang');
+        if (stored) {
+            window._lang = stored;
+        } else {
+            const nav = navigator.language || navigator.userLanguage || 'en';
+            window._lang = nav.startsWith('zh') ? 'zh' : 'en';
+        }
+    })();
+    function t(key) {
+        return (I18N[window._lang] || I18N.en)[key] || (I18N.en[key]) || key;
+    }
+    function toggleLang() {
+        window._lang = window._lang === 'zh' ? 'en' : 'zh';
+        localStorage.setItem('lang', window._lang);
+        location.reload();
+    }
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body>
     {% block body %}{% endblock %}
     {% block scripts %}{% endblock %}
+    <script>
+    // Theme toggle (works on all pages)
+    function toggleTheme() {
+        const html = document.documentElement;
+        const current = html.getAttribute('data-theme');
+        const isDark = current === 'dark' || (!current && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const next = isDark ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        updateThemeIcons();
+    }
+    function updateThemeIcons() {
+        const html = document.documentElement;
+        const theme = html.getAttribute('data-theme');
+        const isDark = theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const sunSvg = '<circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M14.4 5.6l1.4-1.4M4.2 15.8l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>';
+        const moonSvg = '<path d="M17 10.5A7.5 7.5 0 019.5 3 7 7 0 1017 10.5z" stroke="currentColor" stroke-width="1.5" fill="none"/>';
+        document.querySelectorAll('[id^="theme-icon-"]').forEach(svg => {
+            svg.innerHTML = isDark ? sunSvg : moonSvg;
+        });
+    }
+    document.addEventListener('DOMContentLoaded', updateThemeIcons);
+    </script>
 </body>
 </html>

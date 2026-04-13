@@ -1,0 +1,36 @@
+# ===== Site Configuration =====
+
+site:
+  name: "TOEFL Practice"
+  short_name: "TP"
+  description: "Online mock test platform"
+  organization: "Chao Neng Lu (超能录)"
+
+# Test type configuration (for future scaling: ielts, sat, gre, etc.)
+test_type: toefl
+
+# Section definitions — colors and labels
+# To support a new test type, add a new block and reference it in test_type
+sections:
+  toefl:
+    reading:
+      label: Reading
+      color: "#3b6fe0"
+      color_dark: "#5e9cff"
+    listening:
+      label: Listening
+      color: "#7c4fd6"
+      color_dark: "#bf5af2"
+    speaking:
+      label: Speaking
+      color: "#d06830"
+      color_dark: "#ff9f0a"
+    writing:
+      label: Writing
+      color: "#1a9f5c"
+      color_dark: "#30d158"
+
+# Default admin credentials (only used on first run)
+default_admin:
+  username: admin
+  password: admin

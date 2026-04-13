@@ -1,0 +1,89 @@
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar__header">
+        <a href="/" class="sidebar__brand">
+            <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+                <rect width="28" height="28" rx="6" fill="var(--accent)"/>
+                <path d="M7 9h14M7 14h10M7 19h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="sidebar__title">{{ site.name }}</span>
+        </a>
+    </div>
+    <nav class="sidebar__nav">
+        {% if user and user.role == 'student' %}
+        <a href="/assignments" class="sidebar__link" aria-label="Assignments">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 4h12v12H4z" stroke="currentColor" stroke-width="1.5" fill="none" rx="2"/><path d="M7 9l2 2 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Assignments
+        </a>
+        {% endif %}
+        <a href="/catalog" class="sidebar__link" aria-label="Catalog">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Catalog
+        </a>
+        {% if user %}
+        <a href="/history" class="sidebar__link" aria-label="History">
+            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            History
+        </a>
+        {% endif %}
+        {% if user and user.role in ('admin','teacher') %}
+        <div class="sidebar__divider"></div>
+        <a href="/teacher/results" class="sidebar__link" aria-label="Student Results">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 15l4-6 3 3 4-5 3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Results
+        </a>
+        {% endif %}
+        {% if user and user.role == 'admin' %}
+        <a href="/admin/users" class="sidebar__link" aria-label="Manage Users">
+            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            Users
+        </a>
+        {% endif %}
+    </nav>
+    <div class="sidebar__footer">
+        <div class="sidebar__controls">
+            <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-nav">
+                <svg width="20" height="20" viewBox="0 0 20 20" id="theme-icon-nav"></svg>
+            </button>
+            <button class="lang-toggle" onclick="toggleLang()" aria-label="Toggle language" id="lang-toggle-nav">
+                <span id="lang-label-nav"></span>
+            </button>
+        </div>
+        {% if user %}
+        <div class="sidebar__user">
+            <span class="sidebar__user-name">{{ user.display_name }}</span>
+            <span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>
+        </div>
+        <a href="/logout" class="sidebar__link sidebar__link--muted" aria-label="Log out">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Log out
+        </a>
+        {% elif is_guest %}
+        <div class="sidebar__user">
+            <span class="sidebar__user-name">Guest</span>
+        </div>
+        <a href="/login" class="sidebar__link" aria-label="Log in">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4h2a1 1 0 011 1v10a1 1 0 01-1 1h-2M10 14l-4-4 4-4M6 10h8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Log in
+        </a>
+        {% endif %}
+    </div>
+</aside>
+
+<!-- Mobile hamburger button -->
+<button class="hamburger" id="hamburger" onclick="document.getElementById('sidebar').classList.toggle('sidebar--open'); document.getElementById('sidebar-overlay').classList.toggle('sidebar-overlay--active')" aria-label="Open menu">
+    <svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+</button>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="document.getElementById('sidebar').classList.remove('sidebar--open'); this.classList.remove('sidebar-overlay--active')"></div>
+
+<script>
+// Set lang label + highlight active sidebar link
+document.addEventListener('DOMContentLoaded', function() {
+    var lbl = document.getElementById('lang-label-nav');
+    if (lbl) lbl.textContent = window._lang === 'zh' ? 'EN' : '中文';
+    var path = location.pathname;
+    document.querySelectorAll('.sidebar__link').forEach(function(a) {
+        if (a.getAttribute('href') === path) a.classList.add('sidebar__link--active');
+    });
+});
+</script>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Assignments — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main">
+        <h2 class="page-heading">Assignments</h2>
+
+        {% if not assignments %}
+        <div class="catalog-empty">
+            <p>No tests assigned to you yet.</p>
+            <p class="catalog-empty__hint">Your teacher will assign tests when they're ready.</p>
+        </div>
+        {% else %}
+        <div class="results-list">
+            {% for a in assignments %}
+            {% set t = tests.get(a.test_id) %}
+            {% if t %}
+            <a href="/test/{{ a.test_id }}?mode=full" class="assignment-card">
+                <div class="assignment-card__info">
+                    <div class="assignment-card__name">{{ t.test_name }}</div>
+                    <div class="assignment-card__meta">Assigned {{ a.assigned_at[:10] }}</div>
+                </div>
+                <div class="assignment-card__sections">
+                    {% set sections = t.modules | map(attribute='section') | unique | list %}
+                    {% for sec in sections %}
+                    <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
+                    {% endfor %}
+                </div>
+                <svg width="20" height="20" viewBox="0 0 20 20" class="assignment-card__arrow"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+            </a>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div style="margin-top:32px">
+            <a href="/catalog" class="btn btn--secondary">Browse All Tests</a>
+        </div>
+    </main>
+</div>
+{% endblock %}

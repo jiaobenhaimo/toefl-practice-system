@@ -16,32 +16,42 @@
 
     <!-- TEST-TAKING SCREEN -->
     <div id="screen-test" class="screen">
-        <header class="test-header">
+        <header class="test-header" role="banner">
             <div class="test-header__left">
-                <button class="btn btn--icon" onclick="exitModule()" title="Exit">
+                <button class="btn btn--icon" onclick="exitModule()" title="Exit" aria-label="Exit test">
                     <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4L7 10l6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
                 </button>
-                <div class="test-header__section" id="section-label"></div>
+                <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-test">
+                    <svg width="20" height="20" viewBox="0 0 20 20" id="theme-icon-test"></svg>
+                </button>
             </div>
             <div class="test-header__center">
-                <div class="timer" id="timer">
+                <div class="test-header__section" id="section-label"></div>
+            </div>
+            <div class="test-header__right">
+                <div class="timer" id="timer" aria-live="polite">
                     <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M9 5v4l3 2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
                     <span id="timer-display">--:--</span>
                 </div>
             </div>
-            <div class="test-header__right">
-                <span class="q-counter" id="q-counter"></span>
-            </div>
         </header>
 
-        <div class="test-body" id="test-body"></div>
+        <div class="progress-dots-row" id="progress-row">
+            <div class="progress-dots" id="progress-dots" role="group" aria-label="Question progress"></div>
+            <span class="progress-counter" id="progress-counter"></span>
+        </div>
 
-        <footer class="test-footer">
-            <button class="btn btn--secondary" id="btn-prev" onclick="prevQuestion()" style="display:none">
+        <div class="test-body" id="test-body" role="main"></div>
+
+        <footer class="test-footer" role="navigation" aria-label="Question navigation">
+            <button class="btn btn--secondary" id="btn-prev" onclick="prevQuestion()" style="display:none" aria-label="Previous question">
                 &larr; Previous
             </button>
+            <button class="btn btn--icon btn-bookmark" id="btn-bookmark" onclick="toggleBookmark()" style="display:none" title="Bookmark this question" aria-label="Bookmark this question">
+                <svg width="20" height="20" viewBox="0 0 20 20" id="bookmark-icon"><path d="M5 3h10v14l-5-3-5 3V3z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>
+            </button>
             <div class="test-footer__spacer"></div>
-            <button class="btn btn--primary" id="btn-next" onclick="nextQuestion()">
+            <button class="btn btn--primary" id="btn-next" onclick="nextQuestion()" aria-label="Next question">
                 Next &rarr;
             </button>
         </footer>
@@ -49,10 +59,13 @@
 
     <!-- SECTION TRANSITION SCREEN -->
     <div id="screen-transition" class="screen">
-        <div class="transition-card">
+        <div class="transition-card" role="status">
             <div class="transition-card__done" id="transition-done"></div>
-            <div class="transition-card__next" id="transition-next"></div>
-            <button class="btn btn--primary" id="btn-continue" onclick="loadAndStartModule()">Continue →</button>
+            <div class="transition-divider"></div>
+            <div class="transition-card__label">Up next</div>
+            <div class="transition-card__section" id="transition-section"></div>
+            <div class="transition-card__badge" id="transition-badge"></div>
+            <button class="btn btn--primary" id="btn-continue" onclick="loadAndStartModule()" aria-label="Continue to next section">Continue</button>
         </div>
     </div>
 
