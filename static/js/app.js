@@ -25,6 +25,8 @@ let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
 let isFinishing = false;    // Guard against double-triggering finishCurrentModule
+let audioPlaying = false;   // True while audio is playing (blocks Next in listening)
+let cachedMicStream = null; // Reuse mic stream across speaking questions
 let playedAudio = new Set();    // Track audio clips already played (for no-replay mode)
 
 /* ======= AUDIO CODEC DETECTION ======= */
@@ -219,6 +221,12 @@ async function loadAndStartModule() {
         recordings = {};
         playedAudio = new Set();
         isFinishing = false;
+        audioPlaying = false;
+        // Release mic if switching away from speaking
+        if (cachedMicStream && currentModule.section !== 'speaking') {
+            cachedMicStream.getTracks().forEach(t => t.stop());
+            cachedMicStream = null;
+        }
 
         // UI
         const sectionLabel = capitalize(currentModule.section);
@@ -245,6 +253,10 @@ async function exitModule() {
         stopTimer();
         stopAutoSave();
         await stopRecording();
+        if (cachedMicStream) {
+            cachedMicStream.getTracks().forEach(t => t.stop());
+            cachedMicStream = null;
+        }
         window.location.href = '/';
     }
 }
@@ -321,6 +333,10 @@ function renderQuestion() {
     const total = currentModule.pages.length;
     const section = currentModule.section;
 
+    // Reset audio state for new question
+    audioPlaying = false;
+    setNextButtonEnabled(true);
+
     document.getElementById('q-counter').textContent =
         'Question ' + (currentPageIdx + 1) + ' / ' + total;
 
@@ -361,7 +377,7 @@ function renderQuestion() {
 let _navigating = false;
 
 async function nextQuestion() {
-    if (_navigating) return;
+    if (_navigating || audioPlaying) return;
     _navigating = true;
     try {
         collectAnswer();
@@ -484,9 +500,13 @@ function renderMC(body, page) {
             p.innerHTML = page.passage_html;
             body.appendChild(p);
         }
+        const choicesEl = buildChoices(page);
         if (page.audio) {
-            const opts = page.section === 'listening' ? { autoPlayOnce: true } : {};
-            body.appendChild(createAudioPlayer(page.audio, opts));
+            const isListening = page.section === 'listening';
+            body.appendChild(createAudioPlayer(page.audio, {
+                lockNext: isListening,
+                lockEl: isListening ? choicesEl : null,
+            }));
         }
         if (page.prompt_html) {
             const p = el('div', 'question-prompt');
@@ -495,7 +515,6 @@ function renderMC(body, page) {
         } else if (page.prompt) {
             body.appendChild(el('div', 'question-prompt', escapeHtml(page.prompt)));
         }
-        const choicesEl = buildChoices(page);
         body.appendChild(choicesEl);
     }
 }
@@ -514,7 +533,7 @@ function buildChoices(page) {
             label.classList.add('choice--selected');
         });
         label.appendChild(radio);
-        label.appendChild(el('span', 'choice__text', '<strong>(' + letter + ')</strong> ' + escapeHtml(text)));
+        label.appendChild(el('span', 'choice__text', escapeHtml(text)));
         choicesEl.appendChild(label);
     }
     return choicesEl;
@@ -691,76 +710,186 @@ function renderFreeWrite(body, page) {
 function renderSpeaking(body, page) {
     body.appendChild(el('div', 'speak-instruction', page.content || 'Listen and respond.'));
 
-    const recBtn = el('button', 'btn btn--record btn--record-waiting', 'Listen to the prompt first...');
-    recBtn.id = 'btn-record';
-    recBtn.disabled = true;
-
-    // Enable record button after audio finishes (or immediately if no audio / already played)
-    function enableRecording() {
-        recBtn.disabled = false;
-        recBtn.textContent = 'Start Recording';
-        recBtn.classList.remove('btn--record-waiting');
-        recBtn.classList.add('btn--record-ready');
-    }
-
-    if (page.audio) {
-        const alreadyPlayed = playedAudio.has(page.audio);
-        body.appendChild(createAudioPlayer(page.audio, {
-            autoPlayOnce: true,
-            onEnded: enableRecording,
-        }));
-        if (alreadyPlayed) enableRecording();
-    } else {
-        enableRecording();
-    }
-
+    const statusArea = el('div', 'speak-status'); statusArea.id = 'speak-status';
+    const waveCanvas = document.createElement('canvas');
+    waveCanvas.className = 'waveform-canvas';
+    waveCanvas.width = 600; waveCanvas.height = 80;
+    waveCanvas.style.display = 'none'; // Hidden until recording starts
     const timerWrap = el('div', 'q-timer-wrap');
     timerWrap.innerHTML = '<div class="q-timer-track"><div class="q-timer-bar" id="q-timer-bar"></div></div>' +
         '<span class="q-timer-label" id="q-timer-label">--</span>';
-    body.appendChild(timerWrap);
-
-    const recStatus = el('div', 'rec-status', ''); recStatus.id = 'rec-status';
     const playback = el('div', 'rec-playback'); playback.id = 'rec-playback';
-    if (recordings[page.question_id]) showPlayback(playback, recordings[page.question_id]);
-    recBtn.addEventListener('click', async () => {
-        if (isRecording) {
-            stopRecordingAndSave(page.question_id, playback);
-        } else {
-            try {
-                if (!recordingMimeType) {
-                    recStatus.textContent = 'Recording not supported in this browser.';
-                    return;
+
+    let waveformAnimId = null;
+    let analyser = null;
+    let waveAudioCtx = null;
+
+    function startWaveform(stream) {
+        try {
+            // Match canvas pixel size to display size for sharp rendering
+            const dpr = window.devicePixelRatio || 1;
+            const rect = waveCanvas.getBoundingClientRect();
+            const displayW = rect.width || 600;
+            const displayH = 80;
+            waveCanvas.width = Math.round(displayW * dpr);
+            waveCanvas.height = Math.round(displayH * dpr);
+            const ctx2d = waveCanvas.getContext('2d');
+            ctx2d.scale(dpr, dpr);
+
+            waveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = waveAudioCtx.createMediaStreamSource(stream);
+            analyser = waveAudioCtx.createAnalyser();
+            analyser.fftSize = 128;
+            source.connect(analyser);
+            waveCanvas.style.display = '';
+            drawWaveform();
+        } catch (e) {
+            // Web Audio API not available — skip visualization
+        }
+    }
+
+    function drawWaveform() {
+        if (!analyser) return;
+        const bufLen = analyser.frequencyBinCount;
+        const data = new Uint8Array(bufLen);
+        const ctx = waveCanvas.getContext('2d');
+        // Use CSS display size (scale is already applied)
+        const dpr = window.devicePixelRatio || 1;
+        const W = waveCanvas.width / dpr;
+        const H = waveCanvas.height / dpr;
+        const barCount = 32;
+        const gap = 3;
+        const barW = (W - (barCount - 1) * gap) / barCount;
+        const step = Math.floor(bufLen / barCount);
+
+        function draw() {
+            waveformAnimId = requestAnimationFrame(draw);
+            analyser.getByteFrequencyData(data);
+            ctx.clearRect(0, 0, W, H);
+
+            for (let i = 0; i < barCount; i++) {
+                // Average a few bins for this bar
+                let sum = 0;
+                for (let j = 0; j < step; j++) {
+                    sum += data[i * step + j] || 0;
                 }
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream, { mimeType: recordingMimeType });
-                audioChunks = [];
-                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(audioChunks, { type: recordingMimeType });
-                    recordings[page.question_id] = blob;
-                    answers[page.question_id] = '[audio recorded]';
-                    stream.getTracks().forEach(t => t.stop());
-                    showPlayback(playback, blob);
-                    recStatus.textContent = 'Recording saved.';
-                    recBtn.textContent = 'Re-record';
-                    recBtn.classList.remove('btn--recording');
-                    isRecording = false;
-                };
-                mediaRecorder.start();
-                isRecording = true;
-                recBtn.textContent = 'Stop Recording';
-                recBtn.classList.add('btn--recording');
-                recStatus.textContent = 'Recording...';
-                playback.innerHTML = '';
-                startQuestionTimer(page.time_seconds ?? 30, () => {
-                    if (isRecording) stopRecordingAndSave(page.question_id, playback);
-                });
-            } catch (err) {
-                recStatus.textContent = 'Microphone access denied.';
+                const avg = sum / step;
+                const barH = Math.max(3, (avg / 255) * H);
+                const x = i * (barW + gap);
+                const y = (H - barH) / 2;
+
+                // Gradient from accent color (quiet) to green (loud)
+                const intensity = avg / 255;
+                const r = Math.round(59 + intensity * (26 - 59));
+                const g = Math.round(111 + intensity * (159 - 111));
+                const b = Math.round(224 + intensity * (92 - 224));
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                // Rounded bar (with fillRect fallback)
+                if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(x, y, barW, barH, 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(x, y, barW, barH);
+                }
             }
         }
-    });
-    body.appendChild(recBtn); body.appendChild(recStatus); body.appendChild(playback);
+        draw();
+    }
+
+    function stopWaveform() {
+        if (waveformAnimId) {
+            cancelAnimationFrame(waveformAnimId);
+            waveformAnimId = null;
+        }
+        analyser = null;
+        if (waveAudioCtx) {
+            waveAudioCtx.close().catch(() => {});
+            waveAudioCtx = null;
+        }
+        const ctx = waveCanvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset scale
+        ctx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);
+    }
+
+    // Hide Next button — speaking auto-advances
+    setNextButtonEnabled(false);
+
+    async function getMicStream() {
+        if (cachedMicStream) {
+            const tracks = cachedMicStream.getTracks();
+            if (tracks.length > 0 && tracks[0].readyState === 'live') {
+                return cachedMicStream;
+            }
+        }
+        cachedMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        return cachedMicStream;
+    }
+
+    async function startAutoRecord() {
+        statusArea.textContent = 'Recording in 3...';
+        await sleep(1000);
+        if (!currentModule) return;
+        statusArea.textContent = 'Recording in 2...';
+        await sleep(1000);
+        if (!currentModule) return;
+        statusArea.textContent = 'Recording in 1...';
+        await sleep(1000);
+        if (!currentModule) return;
+
+        if (!recordingMimeType) {
+            statusArea.textContent = 'Recording not supported in this browser.';
+            setNextButtonEnabled(true);
+            return;
+        }
+
+        try {
+            const stream = await getMicStream();
+            mediaRecorder = new MediaRecorder(stream, { mimeType: recordingMimeType });
+            audioChunks = [];
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(audioChunks, { type: recordingMimeType });
+                recordings[page.question_id] = blob;
+                answers[page.question_id] = '[audio recorded]';
+                isRecording = false;
+                stopWaveform();
+                statusArea.textContent = 'Recording saved.';
+                if (currentModule && !isFinishing) nextQuestion();
+            };
+            mediaRecorder.start();
+            isRecording = true;
+            statusArea.textContent = 'Recording...';
+            startWaveform(stream);
+            const duration = page.time_seconds ?? 30;
+            startQuestionTimer(duration, () => {
+                if (isRecording) {
+                    stopWaveform();
+                    stopRecordingAndSave();
+                }
+            });
+        } catch (err) {
+            statusArea.textContent = 'Microphone access denied. Click Next to skip.';
+            setNextButtonEnabled(true);
+        }
+    }
+
+    if (page.audio) {
+        body.appendChild(createAudioPlayer(page.audio, {
+            onEnded: () => startAutoRecord(),
+        }));
+    } else {
+        startAutoRecord();
+    }
+
+    body.appendChild(statusArea);
+    body.appendChild(waveCanvas);
+    body.appendChild(timerWrap);
+    body.appendChild(playback);
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 let _pendingStop = null; // Shared Promise for in-progress recording stop
@@ -817,67 +946,100 @@ function showPlayback(container, blob) {
     container.appendChild(audio);
 }
 
+function setNextButtonEnabled(enabled) {
+    const btn = document.getElementById('btn-next');
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.toggle('btn--disabled', !enabled);
+}
+
 function createAudioPlayer(src, options) {
-    const autoPlayOnce = options && options.autoPlayOnce;
-    const onEnded = options && options.onEnded;
+    const opts = options || {};
+    const onEnded = opts.onEnded;
+    const lockNext = opts.lockNext || false;
+    const lockEl = opts.lockEl || null;        // Element to disable during playback (e.g. choices)
     const wrap = el('div', 'audio-player');
     const note = el('div', 'audio-note', '');
     wrap.appendChild(note);
 
-    if (autoPlayOnce) {
-        // Already played — show disabled state, no audio element
-        if (playedAudio.has(src)) {
-            note.textContent = 'Audio already played';
-            note.className = 'audio-note audio-note--played';
-            return wrap;
+    // Already played — show disabled state, no audio element
+    if (playedAudio.has(src)) {
+        note.textContent = 'Audio already played';
+        note.className = 'audio-note audio-note--played';
+        if (onEnded) onEnded();
+        return wrap;
+    }
+
+    const audioEl = document.createElement('audio');
+    audioEl.preload = 'auto';
+    audioEl.src = '/audio/' + currentModule.audioDir + '/' + src + '.ogg';
+    audioEl.controls = false;
+    wrap.appendChild(audioEl);
+
+    // Progress bar
+    const progressWrap = el('div', 'audio-progress-wrap');
+    const progressBar = el('div', 'audio-progress-bar');
+    progressWrap.appendChild(progressBar);
+    wrap.appendChild(progressWrap);
+
+    audioEl.addEventListener('timeupdate', () => {
+        if (audioEl.duration) {
+            progressBar.style.width = ((audioEl.currentTime / audioEl.duration) * 100) + '%';
         }
+    });
 
-        const audioEl = document.createElement('audio');
-        audioEl.preload = 'auto';
-        audioEl.src = '/audio/' + currentModule.audioDir + '/' + src + '.ogg';
-        audioEl.controls = false;
-        wrap.appendChild(audioEl);
+    audioEl.addEventListener('ended', () => {
+        note.textContent = 'Audio played (no replay)';
+        note.className = 'audio-note audio-note--played';
+        audioEl.remove();
+        progressWrap.remove();
+        audioPlaying = false;
+        if (lockNext) setNextButtonEnabled(true);
+        if (lockEl) lockEl.classList.remove('choices--locked');
+        if (onEnded) onEnded();
+    });
 
-        // Show progress bar while playing
-        const progressWrap = el('div', 'audio-progress-wrap');
-        const progressBar = el('div', 'audio-progress-bar');
-        progressWrap.appendChild(progressBar);
-        wrap.appendChild(progressWrap);
+    audioEl.addEventListener('error', () => {
+        note.innerHTML = 'Audio file not found: <code>' + src + '.ogg</code>';
+        note.classList.add('audio-note--error');
+        audioPlaying = false;
+        if (lockNext) setNextButtonEnabled(true);
+        if (lockEl) lockEl.classList.remove('choices--locked');
+        if (onEnded) onEnded();
+    });
 
-        audioEl.addEventListener('timeupdate', () => {
-            if (audioEl.duration) {
-                progressBar.style.width = ((audioEl.currentTime / audioEl.duration) * 100) + '%';
-            }
-        });
+    // Lock Next button and choices during playback
+    if (lockNext) {
+        audioPlaying = true;
+        setNextButtonEnabled(false);
+    }
+    if (lockEl) lockEl.classList.add('choices--locked');
 
-        audioEl.addEventListener('ended', () => {
-            note.textContent = 'Audio played (no replay)';
-            note.className = 'audio-note audio-note--played';
-            audioEl.remove();
-            progressWrap.remove();
-            if (onEnded) onEnded();
-        });
+    note.textContent = 'Loading audio...';
 
-        audioEl.addEventListener('error', () => {
-            note.innerHTML = 'Audio file not found: <code>' + src + '.ogg</code>';
-            note.classList.add('audio-note--error');
-            if (onEnded) onEnded();
-        });
-
-        // Attempt auto-play
+    // Wait for enough data to play smoothly, then start
+    let _playbackStarted = false;
+    function startPlayback() {
+        if (_playbackStarted) return;
+        _playbackStarted = true;
         note.textContent = 'Playing...';
+        audioPlaying = true;
+        playedAudio.add(src);
         const playPromise = audioEl.play();
         if (playPromise !== undefined) {
-            playPromise.then(() => {
-                playedAudio.add(src);
-            }).catch(() => {
-                // Browser blocked auto-play — show manual play button
+            playPromise.catch(() => {
+                // Browser blocked autoplay — unlock everything, show manual button
+                audioPlaying = false;
+                if (lockNext) setNextButtonEnabled(true);
+                if (lockEl) lockEl.classList.remove('choices--locked');
                 note.textContent = '';
                 progressWrap.style.display = 'none';
                 const playBtn = el('button', 'btn btn--primary audio-play-btn', 'Click to Play Audio');
                 playBtn.addEventListener('click', () => {
+                    audioPlaying = true;
+                    if (lockNext) setNextButtonEnabled(false);
+                    if (lockEl) lockEl.classList.add('choices--locked');
                     audioEl.play();
-                    playedAudio.add(src);
                     playBtn.remove();
                     note.textContent = 'Playing...';
                     progressWrap.style.display = '';
@@ -885,18 +1047,17 @@ function createAudioPlayer(src, options) {
                 note.appendChild(playBtn);
             });
         }
+    }
+
+    // Use canplaythrough to avoid glitchy playback from insufficient buffering
+    if (audioEl.readyState >= 4) {
+        startPlayback();
     } else {
-        // Normal mode — controls visible, replayable
-        const audioEl = document.createElement('audio');
-        audioEl.preload = 'auto';
-        audioEl.src = '/audio/' + currentModule.audioDir + '/' + src + '.ogg';
-        audioEl.controls = true;
-        note.textContent = 'Audio: ' + src + '.ogg';
-        wrap.appendChild(audioEl);
-        audioEl.addEventListener('error', () => {
-            note.innerHTML = 'Audio file not found: <code>' + src + '.ogg</code>';
-            note.classList.add('audio-note--error');
-        });
+        audioEl.addEventListener('canplaythrough', startPlayback, { once: true });
+        // Fallback: if canplaythrough never fires (e.g. very slow network), try after 3s
+        setTimeout(() => {
+            if (!playedAudio.has(src)) startPlayback();
+        }, 3000);
     }
 
     return wrap;
@@ -1159,12 +1320,9 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-    // Ignore if typing in an input or textarea
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea') return;
-
-    // Only act during test-taking on MC questions
-    if (!currentModule) return;
+    if (!currentModule || audioPlaying) return;
     const page = currentModule.pages[currentPageIdx];
     if (!page || page.question_type !== 'mc') return;
 

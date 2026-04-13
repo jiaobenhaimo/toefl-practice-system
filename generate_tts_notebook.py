@@ -163,9 +163,14 @@ def make_notebook(file_groups):
         '!apt-get -qq -y install espeak-ng > /dev/null 2>&1'
     ))
 
+    # Base64-encode the JSON to avoid quote/escape issues in notebook cells
+    import base64
+    data_b64 = base64.b64encode(data_json.encode('utf-8')).decode('ascii')
+
     # Cell 2: Init + data
     cells.append(_code_cell(
         'import json\n'
+        'import base64\n'
         'import numpy as np\n'
         'import soundfile as sf\n'
         'import subprocess\n'
@@ -174,11 +179,11 @@ def make_notebook(file_groups):
         'import zipfile\n'
         'from kokoro import KPipeline\n'
         '\n'
-        'pipeline = KPipeline(lang_code=\'a\')\n'
+        "pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')\n"
         'SAMPLE_RATE = 24000\n'
-        'VOICE_MAP = {\'female\': \'af_heart\', \'male\': \'am_fenrir\'}\n'
+        "VOICE_MAP = {'female': 'af_heart', 'male': 'am_fenrir'}\n"
         '\n'
-        f'ALL_GROUPS = json.loads(\'\'\'{data_json}\'\'\')\n'
+        f'ALL_GROUPS = json.loads(base64.b64decode("{data_b64}").decode("utf-8"))\n'
         '\n'
         'total = sum(len(g["blocks"]) for g in ALL_GROUPS)\n'
         'print(f"Loaded {total} audio files across {len(ALL_GROUPS)} group(s)")\n'

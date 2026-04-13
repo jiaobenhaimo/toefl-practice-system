@@ -61,7 +61,6 @@ def _cached_module_response(filepath, module_index):
             'timer_minutes': module_data['timer_minutes'],
         },
         'pages': pages,
-        'audio_dir': parsed['audio_dir'],
     }
     _module_api_cache[cache_key] = (mtime, response)
     return response

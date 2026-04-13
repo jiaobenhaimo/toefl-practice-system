@@ -60,6 +60,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-inp
 }
 .btn--primary { background: var(--accent); color: #fff; }
 .btn--primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+.btn--disabled, .btn:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
 .btn--secondary { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
 .btn--secondary:hover { background: var(--bg-hover); }
 .btn--icon { background: transparent; color: var(--text-muted); padding: 6px; border-radius: var(--radius-sm); }
@@ -176,7 +177,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-inp
 .question-prompt p { margin-bottom: 8px; }
 
 /* ===== MULTIPLE CHOICE ===== */
-.choices { display: flex; flex-direction: column; gap: 10px; }
+.choices { display: flex; flex-direction: column; gap: 10px; transition: opacity 0.3s; }
+.choices--locked { opacity: 0.35; pointer-events: none; }
 .choice { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: all 0.2s; min-height: 44px; }
 .choice:hover { border-color: var(--accent); background: var(--bg-hover); }
 .choice--selected { border-color: var(--accent); background: var(--accent-dim); }
@@ -238,6 +240,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-inp
 
 /* ===== SPEAKING ===== */
 .speak-instruction { font-size: 1.05rem; margin-bottom: 20px; line-height: 1.6; }
+.speak-status { font-size: 1rem; font-weight: 600; color: var(--accent); margin: 16px 0; min-height: 24px; text-align: center; }
+.waveform-canvas { display: block; width: 100%; max-width: 600px; height: 80px; margin: 12px auto; border-radius: var(--radius); background: var(--bg-input); border: 1px solid var(--border); }
 .q-timer-wrap { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
 .q-timer-track { flex: 1; height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
 .q-timer-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 1s linear; }

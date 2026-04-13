@@ -40,13 +40,6 @@ gunicorn -w 4 -b 0.0.0.0:8080 app:app
 
 Browsers require HTTPS for microphone access on non-localhost domains. Use a reverse proxy (Nginx, Caddy) with SSL for production.
 
-### Docker
-
-```bash
-docker build -t toefl-practice .
-docker run -p 8080:8080 -v /path/to/tests:/app/tests toefl-practice
-```
-
 ## Usage
 
 ### For teachers: creating tests
@@ -69,12 +62,12 @@ Upload the generated `.ipynb` to Google Colab, select a T4 GPU runtime, and run 
 
 1. Open `http://localhost:8080` and click a test card.
 2. Choose **Take Full Test** (all sections in order) or a **specific section** (e.g., Reading). Choosing a section starts all modules of that section as a chain.
-3. Answer one question at a time. The countdown timer turns amber at 5 minutes and red at 1 minute remaining.
-4. Reading allows backward navigation. All other sections are forward-only.
-5. Listening audio plays once. No replay.
-6. Speaking: listen to the prompt; the record button activates when the audio finishes.
-7. Writing: type in the text area with live word count.
-8. Between modules, a transition screen shows which section is complete and what comes next (no scores are shown until the end).
+3. Answer one question at a time. The countdown timer turns amber at 5 minutes remaining and red at 1 minute.
+4. **Reading:** allows backward navigation. All other sections are forward-only.
+5. **Listening:** audio plays once automatically. While the audio is playing, the Next button and answer choices are disabled. No replay.
+6. **Speaking:** fully automatic flow. The prompt audio plays, then a 3-second countdown appears ("Recording in 3... 2... 1..."), the microphone activates, and a real-time waveform shows mic input. When the question timer expires, recording stops and the system auto-advances to the next question.
+7. **Writing:** type in the text area with live word count.
+8. Between different sections, a transition screen shows which section is complete and what comes next. No scores are shown until the end.
 9. On the final results screen, scores are shown per section with per-question detail. Cloze blanks show green/red per blank. Click **Download Answers (.zip)** to get text answers and audio recordings.
 
 Progress auto-saves every 30 seconds. Audio recordings cannot be saved across sessions.
@@ -105,6 +98,7 @@ toefl-practice-system/
   static/css/style.css      Light-themed UI (Apple HIG compliant)
   static/js/app.js          Test engine
   tests/                    Test content (*.md, *.tts, audio folders)
+    example-test.md         Example test with all 7 question types
 ```
 
 ## Design
