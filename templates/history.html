@@ -13,23 +13,33 @@
             <p class="catalog-empty__hint">Complete a test and your results will appear here.</p>
         </div>
         {% else %}
-        <div class="results-list">
-            {% for r in results %}
-            <a href="/results/{{ r.id }}" class="result-row result-row--neutral result-row--clickable">
-                <span class="result-row__q" style="min-width:32px">{{ loop.index }}</span>
-                <span class="result-row__ans" style="flex:2">
-                    <strong>{{ r.test_name or r.test_id }}</strong>
-                    {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
-                </span>
-                <span class="result-row__correct" style="flex:0;min-width:80px">
-                    {% if r.total_questions > 0 %}
-                    {{ r.total_correct }}/{{ r.total_questions }}
-                    ({{ (r.total_correct / r.total_questions * 100)|round|int }}%)
-                    {% endif %}
-                </span>
-                <span class="result-row__time">{{ r.date[:10] }}</span>
-            </a>
-            {% endfor %}
+        <div class="card">
+            <table class="user-table">
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th style="width:100px">Score</th>
+                        <th style="width:90px">Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in results %}
+                    <tr onclick="location.href='/results/{{ r.id }}'" style="cursor:pointer">
+                        <td>
+                            <strong>{{ r.test_name or r.test_id }}</strong>
+                            {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if r.total_questions > 0 %}
+                            {{ r.total_correct }}/{{ r.total_questions }}
+                            ({{ (r.total_correct / r.total_questions * 100)|round|int }}%)
+                            {% endif %}
+                        </td>
+                        <td style="color:var(--text-dim)">{{ r.date[:10] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% endif %}
     </main>

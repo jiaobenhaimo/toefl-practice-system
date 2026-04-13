@@ -22,8 +22,9 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 60 * 60 * 24 * 31
 
 @app.context_processor
 def inject_config():
-    """Make site config available in all templates."""
-    return {'site': SITE_CONFIG.get('site', {}), 'config': SITE_CONFIG}
+    """Make site config and announcement available in all templates."""
+    announcement = db.get_active_announcement()
+    return {'site': SITE_CONFIG.get('site', {}), 'config': SITE_CONFIG, 'announcement': announcement}
 
 TESTS_DIR = os.environ.get('TOEFL_TESTS_DIR',
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tests'))
@@ -281,6 +282,53 @@ def admin_edit_user(uid):
         password=pw or None, role=request.form.get('role'))
     flash('User updated'); return redirect('/admin/users')
 
+@app.route('/admin/users/import', methods=['POST'])
+@require_login
+@require_role('admin')
+def admin_import_users():
+    import csv, io
+    f = request.files.get('csv_file')
+    if not f: flash('No file uploaded'); return redirect('/admin/users')
+    try:
+        text = f.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+        users = []
+        for row in reader:
+            un = (row.get('username') or '').strip()
+            pw = (row.get('password') or '').strip()
+            if un and pw:
+                users.append({
+                    'username': un, 'password': pw,
+                    'role': (row.get('role') or 'student').strip(),
+                    'display_name': (row.get('display_name') or un).strip(),
+                })
+        if not users: flash('No valid rows found in CSV'); return redirect('/admin/users')
+        created, errors = db.bulk_create_users(users)
+        msg = f'{created} user(s) created'
+        if errors: msg += f', {len(errors)} error(s): ' + '; '.join(errors[:3])
+        flash(msg)
+    except Exception as e:
+        flash(f'Import error: {e}')
+    return redirect('/admin/users')
+
+@app.route('/admin/announcement', methods=['POST'])
+@require_login
+@require_role('admin')
+def admin_announcement():
+    content = request.form.get('content', '').strip()
+    if content:
+        db.create_announcement(cur_user()['id'], content)
+        flash('Announcement posted')
+    return redirect('/admin/users')
+
+@app.route('/admin/announcement/dismiss', methods=['POST'])
+@require_login
+@require_role('admin')
+def admin_dismiss_announcement():
+    db.dismiss_announcement()
+    flash('Announcement dismissed')
+    return redirect('/admin/users')
+
 # ===== Teacher =====
 
 @app.route('/teacher/results')
@@ -366,6 +414,23 @@ def history_page():
     u = cur_user()
     return render_template('history.html', results=db.get_results(user_id=u['id']), user=u)
 
+# ===== Notes API =====
+
+@app.route('/api/notes/<int:result_id>', methods=['GET'])
+@require_login
+def api_get_notes(result_id):
+    u = cur_user()
+    return jsonify(db.get_notes(u['id'], result_id))
+
+@app.route('/api/notes/<int:result_id>', methods=['POST'])
+@require_login
+def api_save_note(result_id):
+    u = cur_user()
+    data = request.get_json()
+    if not data: abort(400)
+    db.save_note(u['id'], result_id, data.get('question_id', ''), data.get('note', ''))
+    return jsonify({'ok': True})
+
 # ===== PDF =====
 
 @app.route('/api/export-pdf', methods=['POST'])
@@ -427,7 +492,7 @@ def export_pdf():
 
 # ===== Init =====
 with app.app_context():
-    db.init_db()
+    db.init_db(SITE_CONFIG)
 
 if __name__ == '__main__':
     import argparse

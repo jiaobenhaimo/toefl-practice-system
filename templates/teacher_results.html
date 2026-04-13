@@ -14,27 +14,27 @@
         {% endwith %}
 
         {% if students and tests %}
-        <div class="card" style="margin-bottom:24px">
+        <div class="card" style="margin-bottom:16px">
             <h3 class="card__title">Assign Test</h3>
-            <form method="POST" action="/teacher/assign" class="form-row">
-                <select name="student_id" required class="login-input">
+            <form method="POST" action="/teacher/assign" class="form-row" style="align-items:center">
+                <select name="student_id" required class="login-input" style="flex:1">
                     <option value="">Student...</option>
                     {% for s in students %}
                     <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
                     {% endfor %}
                 </select>
-                <select name="test_id" required class="login-input">
+                <select name="test_id" required class="login-input" style="flex:1">
                     <option value="">Test...</option>
                     {% for tid, t in tests.items() %}
                     <option value="{{ tid }}">{{ t.test_name }}</option>
                     {% endfor %}
                 </select>
-                <select name="section" class="login-input">
+                <select name="section" class="login-input" style="flex:0.6">
                     <option value="">Full test</option>
-                    <option value="reading">Reading only</option>
-                    <option value="listening">Listening only</option>
-                    <option value="writing">Writing only</option>
-                    <option value="speaking">Speaking only</option>
+                    <option value="reading">Reading</option>
+                    <option value="listening">Listening</option>
+                    <option value="writing">Writing</option>
+                    <option value="speaking">Speaking</option>
                 </select>
                 <button type="submit" class="btn btn--primary">Assign</button>
             </form>
@@ -44,24 +44,33 @@
         <div class="card">
             <h3 class="card__title">Recent Results</h3>
             {% if results %}
-            <div class="results-list">
-                {% for r in results %}
-                <a href="/results/{{ r.id }}" class="result-row result-row--neutral result-row--clickable">
-                    <span class="result-row__q" style="min-width:32px">{{ loop.index }}</span>
-                    <span class="result-row__ans" style="flex:2">
-                        <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
-                        {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
-                    </span>
-                    <span class="result-row__correct" style="flex:1">{{ r.test_name or r.test_id }}</span>
-                    <span class="result-row__correct" style="flex:0;min-width:80px">
-                        {% if r.total_questions > 0 %}{{ r.total_correct }}/{{ r.total_questions }}{% endif %}
-                    </span>
-                    <span class="result-row__time">{{ r.date[:10] }}</span>
-                </a>
-                {% endfor %}
-            </div>
+            <table class="user-table">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Test</th>
+                        <th style="width:100px">Score</th>
+                        <th style="width:90px">Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in results %}
+                    <tr onclick="location.href='/results/{{ r.id }}'" style="cursor:pointer">
+                        <td>
+                            <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
+                            {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
+                        </td>
+                        <td>{{ r.test_name or r.test_id }}</td>
+                        <td>
+                            {% if r.total_questions > 0 %}{{ r.total_correct }}/{{ r.total_questions }}{% endif %}
+                        </td>
+                        <td style="color:var(--text-dim)">{{ r.date[:10] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
             {% else %}
-            <p style="color:var(--text-muted);padding:20px 0">No results yet.</p>
+            <p style="color:var(--text-muted);padding:16px 0">No results yet.</p>
             {% endif %}
         </div>
     </main>

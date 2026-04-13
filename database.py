@@ -45,6 +45,27 @@ CREATE TABLE IF NOT EXISTS test_assignments (
     FOREIGN KEY (teacher_id) REFERENCES users(id),
     FOREIGN KEY (student_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS announcements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    author_id INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (author_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS student_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    result_id INTEGER NOT NULL,
+    question_id TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (result_id) REFERENCES test_results(id),
+    UNIQUE(user_id, result_id, question_id)
+);
 """
 
 
@@ -58,18 +79,33 @@ def get_db():
     return conn
 
 
-def init_db():
-    """Initialize database schema and create default admin if needed."""
+def init_db(config=None):
+    """Initialize database schema and create default accounts if needed."""
     conn = get_db()
     conn.executescript(SCHEMA)
     # Create default admin account if none exists
     admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
     if not admin:
+        admin_cfg = (config or {}).get('default_admin', {})
+        un = admin_cfg.get('username', 'admin')
+        pw = admin_cfg.get('password', 'admin')
         conn.execute(
             "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, 'admin', 'Administrator')",
-            ('admin', generate_password_hash('admin'))
+            (un, generate_password_hash(pw))
         )
-        print("Created default admin account: admin / admin")
+        print(f"Created default admin account: {un} / {pw}")
+    # Create test student account if configured and not exists
+    test_cfg = (config or {}).get('test_account')
+    if test_cfg:
+        un = test_cfg.get('username', 'student')
+        existing = conn.execute("SELECT id FROM users WHERE username=?", (un,)).fetchone()
+        if not existing:
+            pw = test_cfg.get('password', 'student')
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, 'student', ?)",
+                (un, generate_password_hash(pw), un.capitalize())
+            )
+            print(f"Created test student account: {un} / {pw}")
     conn.commit()
     conn.close()
 
@@ -228,3 +264,81 @@ def remove_assignment(assignment_id):
     conn.execute("DELETE FROM test_assignments WHERE id=?", (assignment_id,))
     conn.commit()
     conn.close()
+
+# ===== Announcements =====
+
+def get_active_announcement():
+    """Get the most recent active announcement."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT a.*, u.display_name FROM announcements a JOIN users u ON a.author_id=u.id "
+        "WHERE a.active=1 ORDER BY a.created_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_announcement(author_id, content):
+    """Create a new announcement (deactivates previous ones)."""
+    conn = get_db()
+    conn.execute("UPDATE announcements SET active=0 WHERE active=1")
+    conn.execute(
+        "INSERT INTO announcements (author_id, content) VALUES (?, ?)",
+        (author_id, content)
+    )
+    conn.commit()
+    conn.close()
+
+
+def dismiss_announcement():
+    """Deactivate all announcements."""
+    conn = get_db()
+    conn.execute("UPDATE announcements SET active=0")
+    conn.commit()
+    conn.close()
+
+
+# ===== Student notes =====
+
+def get_notes(user_id, result_id):
+    """Get all notes for a result."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM student_notes WHERE user_id=? AND result_id=? ORDER BY question_id",
+        (user_id, result_id)
+    ).fetchall()
+    conn.close()
+    return {r['question_id']: r['note'] for r in rows}
+
+
+def save_note(user_id, result_id, question_id, note):
+    """Save or update a note."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO student_notes (user_id, result_id, question_id, note) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(user_id, result_id, question_id) DO UPDATE SET note=excluded.note, updated_at=datetime('now')",
+        (user_id, result_id, question_id, note)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===== Bulk user import =====
+
+def bulk_create_users(users_list):
+    """Create multiple users. Returns (created_count, errors)."""
+    conn = get_db()
+    created = 0
+    errors = []
+    for u in users_list:
+        try:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
+                (u['username'], generate_password_hash(u['password']), u.get('role', 'student'), u.get('display_name', u['username']))
+            )
+            created += 1
+        except Exception as e:
+            errors.append(f"{u['username']}: {e}")
+    conn.commit()
+    conn.close()
+    return created, errors

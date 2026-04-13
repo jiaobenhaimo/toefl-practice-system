@@ -1,59 +1,67 @@
 **[English](README.md)** | **[中文](README.zh.md)**
 
-# 超能录 在线模考系统
+# 在线模考系统
 
-支持用户认证、服务端评分、角色面板和 YAML 配置的在线模考平台。当前配置为 TOEFL，支持多种考试类型并行。
+支持用户认证、服务端评分、角色面板和多考试类型的在线模拟考试平台。目前用于 TOEFL 练习，架构支持任何标准化考试格式。
 
-## 快速开始
+> 本项目主要通过 [Claude](https://claude.ai) (Anthropic) vibe coding 开发。架构、代码和文档均通过迭代对话生成。
+
+---
+
+## 部署
 
 ```bash
+git clone <repo-url> && cd toefl-practice-system
+
+python -m venv venv
+source venv/bin/activate
+
 pip install -r requirements.txt
-python app.py
+python app.py                    # http://localhost:8080
 ```
 
-默认管理员：**admin / admin**，请在 `/admin/users` 立即修改。
+首次运行自动创建数据库和默认账号（见 `config.yaml`）。
 
-## 用户角色
+### 生产部署
 
-| 角色 | 权限 |
-|---|---|
-| **管理员** | 管理账号、查看所有成绩、分配测试 |
-| **教师** | 查看学生成绩、分配测试（完整或按部分） |
-| **学生** | 完成分配的测试、浏览目录、查看历史和详细成绩 |
-| **访客** | 匿名浏览目录和练习 |
+```bash
+source venv/bin/activate
+export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+gunicorn -w 4 -b 0.0.0.0:8080 app:app
+```
 
-## 导航
+配置 Nginx/Caddy + SSL。
 
-桌面端固定 240px 侧边栏，移动端汉堡菜单。包含角色对应的页面链接、深色模式和中英文切换。
+### 配置
 
-## 考试目录
+`config.yaml` 定义站点名称、考试类型、默认账号。环境变量 `TOEFL_TESTS_DIR`、`TOEFL_DB_PATH`、`SECRET_KEY` 可覆盖。
 
-测试以自适应 3:2 卡片网格展示。点击卡片可选择完整考试或单独部分。
+---
 
-## 测试分配
+## 架构
 
-教师在 `/teacher/results` 分配测试（支持选择特定部分）。学生在 `/assignments` 查看分配，也可在 `/catalog` 自由练习。
+- **SQLite** 单文件数据库（用户、成绩、分配）
+- **服务端评分**（答案不发送到客户端）
+- **多考试类型**（config.yaml 定义，支持并行）
+- **四种角色**：管理员、教师、学生、访客
 
-## 成绩
-
-学生在 `/history` 查看历史，点击可跳转 `/results/<id>` 查看每题详情（对错、用时、正确答案）。教师和管理员在 `/teacher/results` 查看所有学生成绩。
-
-## 配置
-
-`config.yaml` 配置站点名称和考试类型定义。支持在 `test_types` 下添加新考试格式（IELTS、SAT 等）。
-
-## 试卷编写
-
-编写工具在 `authoring/` 目录：`FORMAT.md`（格式规范）和 `generate_tts_notebook.py`（TTS 音频生成）。
+---
 
 ## 功能
 
-- 自适应卡片网格目录、侧边栏导航
-- SQLite 数据库、服务端评分
-- 按部分分配测试、学生成绩详情页
-- 练习模式、中英文界面、深色模式
-- PDF 导出、每题计时、七种题型
-- YAML 多考试类型配置、ARIA 无障碍
+- 七种题型、练习模式、计时器
+- 侧边栏导航（桌面固定、移动端汉堡菜单）
+- 自适应卡片网格、模态选择框
+- 管理面板（创建/编辑/删除用户、确认对话框、角色切换按钮）
+- 教师面板（成绩查看、按部分分配测试、学生进度追踪）
+- 自助密码修改、深色模式、中英文界面
+- PDF 导出、ZIP 下载、每题计时
+
+---
+
+## 试卷编写
+
+工具在 `authoring/` 目录。详见 `authoring/FORMAT.md`。
 
 ## 许可证
 

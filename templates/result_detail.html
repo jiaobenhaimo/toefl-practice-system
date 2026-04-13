@@ -19,10 +19,45 @@
             {% endif %}
         </p>
 
-        {% set sections = result.sections_json | tojson | safe %}
         <div id="result-sections"></div>
 
         <script>
+        var RESULT_ID = {{ result.id }};
+        var _notes = {};
+
+        // Load existing notes
+        fetch('/api/notes/' + RESULT_ID).then(function(r) { return r.json(); }).then(function(data) {
+            _notes = data || {};
+            // Fill in any open note areas
+            document.querySelectorAll('.note-area').forEach(function(ta) {
+                var qid = ta.getAttribute('data-qid');
+                if (_notes[qid]) ta.value = _notes[qid];
+            });
+        }).catch(function(){});
+
+        function toggleNote(qid) {
+            var el = document.getElementById('note-' + qid.replace(/\./g, '-'));
+            if (!el) return;
+            var open = el.style.display !== 'none';
+            el.style.display = open ? 'none' : 'block';
+            if (!open) el.querySelector('textarea').focus();
+        }
+
+        function saveNote(qid) {
+            var el = document.getElementById('note-' + qid.replace(/\./g, '-'));
+            var ta = el.querySelector('textarea');
+            var note = ta.value.trim();
+            _notes[qid] = note;
+            fetch('/api/notes/' + RESULT_ID, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({question_id: qid, note: note})
+            });
+            // Visual feedback
+            var btn = document.querySelector('[data-note-btn="' + qid + '"]');
+            if (btn) btn.classList.toggle('note-btn--has', note.length > 0);
+        }
+
         (function() {
             var sections = {{ result.sections_json | safe }};
             var container = document.getElementById('result-sections');
@@ -47,29 +82,50 @@
                 html += '<div class="results-list">';
                 (sec.details || []).forEach(function(d) {
                     var timeLabel = d.time ? '<span class="result-row__time">' + d.time + 's</span>' : '';
+                    var noteId = (d.qid || '').replace(/\./g, '-');
+                    var hasNote = _notes[d.qid] ? ' note-btn--has' : '';
+                    var noteBtn = '<button class="btn btn--icon note-btn' + hasNote + '" data-note-btn="' + d.qid + '" onclick="toggleNote(\'' + d.qid + '\')" title="Add note" aria-label="Note"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 11V14h3l8-8-3-3-8 8zM13.7 4.3a1 1 0 000-1.4l-1.6-1.6a1 1 0 00-1.4 0l-1.2 1.2 3 3 1.2-1.2z" fill="currentColor"/></svg></button>';
+
                     if (d.type === 'mc' || d.type === 'build_sentence' || d.type === 'cloze') {
                         var cls = d.correct ? 'result-row--correct' : 'result-row--wrong';
                         html += '<div class="result-row ' + cls + '">';
                         html += '<span class="result-row__q">Q' + d.qid + '</span>';
                         html += '<span class="result-row__icon">' + (d.correct ? checkSvg : crossSvg) + '</span>';
-                        html += '<span class="result-row__ans">' + (d.user || '—') + '</span>';
+                        html += '<span class="result-row__ans">' + (d.user || '\u2014') + '</span>';
                         html += '<span class="result-row__correct">' + (d.fullWord || d.expected || '') + '</span>';
-                        html += timeLabel + '</div>';
+                        html += timeLabel + noteBtn + '</div>';
                     } else if (d.type === 'email' || d.type === 'discussion') {
                         html += '<div class="result-row result-row--neutral">';
                         html += '<span class="result-row__q">Q' + d.qid + '</span>';
-                        html += '<span class="result-row__ans">' + d.type + ' — ' + (d.wordCount || 0) + ' words</span>';
-                        html += timeLabel + '</div>';
+                        html += '<span class="result-row__ans">' + d.type + ' \u2014 ' + (d.wordCount || 0) + ' words</span>';
+                        html += timeLabel + noteBtn + '</div>';
                     } else if (d.type === 'listen_repeat' || d.type === 'interview') {
                         html += '<div class="result-row ' + (d.hasRecording ? 'result-row--neutral' : 'result-row--wrong') + '">';
                         html += '<span class="result-row__q">Q' + d.qid + '</span>';
                         html += '<span class="result-row__ans">' + (d.hasRecording ? 'Audio recorded' : 'No recording') + '</span>';
-                        html += timeLabel + '</div>';
+                        html += timeLabel + noteBtn + '</div>';
                     }
+
+                    // Note area (hidden by default)
+                    html += '<div class="note-area-wrap" id="note-' + noteId + '" style="display:none">';
+                    html += '<textarea class="note-area" data-qid="' + d.qid + '" placeholder="Add a note..." onblur="saveNote(\'' + d.qid + '\')" rows="2"></textarea>';
+                    html += '</div>';
                 });
                 html += '</div></div>';
                 container.innerHTML += html;
             });
+
+            // Fill notes after rendering
+            setTimeout(function() {
+                for (var qid in _notes) {
+                    var ta = document.querySelector('.note-area[data-qid="' + qid + '"]');
+                    if (ta && _notes[qid]) {
+                        ta.value = _notes[qid];
+                        var btn = document.querySelector('[data-note-btn="' + qid + '"]');
+                        if (btn) btn.classList.add('note-btn--has');
+                    }
+                }
+            }, 100);
         })();
         </script>
     </main>

@@ -13,7 +13,7 @@
         {% endif %}
         {% endwith %}
 
-        <div class="card" style="margin-bottom:24px">
+        <div class="card" style="margin-bottom:16px">
             <h3 class="card__title">Create User</h3>
             <form method="POST" action="/admin/users/create" id="create-form" onsubmit="return confirmCreate(event)">
                 <div class="form-row" style="margin-bottom:12px">
@@ -33,56 +33,101 @@
             </form>
         </div>
 
-        <!-- Confirm modal -->
-        <div class="test-modal-overlay" id="confirm-overlay" onclick="if(event.target===this)closeConfirm()">
-            <div class="test-modal" role="dialog">
-                <h3 class="test-modal__title">Confirm New User</h3>
-                <div id="confirm-body" style="margin:16px 0;font-size:0.95rem;line-height:1.6"></div>
-                <div style="display:flex;gap:10px;justify-content:flex-end">
-                    <button class="btn btn--secondary" onclick="closeConfirm()">Cancel</button>
-                    <button class="btn btn--primary" id="confirm-submit">Create</button>
+        <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+            <div class="card" style="flex:1;min-width:260px">
+                <h3 class="card__title">Bulk Import</h3>
+                <form method="POST" action="/admin/users/import" enctype="multipart/form-data" class="form-row" style="align-items:center">
+                    <input type="file" name="csv_file" accept=".csv" required class="login-input" style="padding:8px">
+                    <button type="submit" class="btn btn--secondary">Import</button>
+                </form>
+            </div>
+            <div class="card" style="flex:1;min-width:260px">
+                <h3 class="card__title">Announcement</h3>
+                {% if announcement %}
+                <div style="background:var(--accent-dim);padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:10px;font-size:0.88rem;display:flex;align-items:center;gap:8px">
+                    <span style="flex:1">{{ announcement.content }}</span>
+                    <form method="POST" action="/admin/announcement/dismiss" style="margin:0">
+                        <button type="submit" class="btn btn--icon" style="color:var(--red)" title="Dismiss">✕</button>
+                    </form>
                 </div>
+                {% endif %}
+                <form method="POST" action="/admin/announcement" class="form-row" style="align-items:center">
+                    <input type="text" name="content" placeholder="Type announcement..." required class="login-input">
+                    <button type="submit" class="btn btn--secondary">Post</button>
+                </form>
             </div>
         </div>
 
         <div class="card">
             <h3 class="card__title">All Users ({{ users|length }})</h3>
-            {% for u in users %}
-            <div class="user-row">
-                <div class="result-row result-row--neutral">
-                    <span class="role-badge role-badge--{{ u.role }}">{{ u.role }}</span>
-                    <span class="result-row__ans" style="flex:2"><strong>{{ u.display_name }}</strong> <span style="color:var(--text-dim)">@{{ u.username }}</span></span>
-                    <span class="result-row__time">{{ u.created_at[:10] }}</span>
-                    {% if u.id != user.id %}
-                    <button class="btn btn--icon" onclick="toggleEdit({{ u.id }})" title="Edit" aria-label="Edit" style="color:var(--accent)">
-                        <svg width="18" height="18" viewBox="0 0 18 18"><path d="M11.5 3.5l3 3L6 15H3v-3L11.5 3.5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-                    </button>
-                    <form method="POST" action="/admin/users/{{ u.id }}/delete" style="margin:0" onsubmit="return confirm('Delete {{ u.username }}?')">
-                        <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete" style="color:var(--red)">
-                            <svg width="18" height="18" viewBox="0 0 18 18"><path d="M5 5l8 8M13 5l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                        </button>
-                    </form>
-                    {% endif %}
-                </div>
-                {% if u.id != user.id %}
-                <form method="POST" action="/admin/users/{{ u.id }}/edit" id="edit-{{ u.id }}" style="display:none;padding:8px 16px 12px">
-                    <div class="form-row">
-                        <input type="text" name="display_name" value="{{ u.display_name }}" placeholder="Display name" class="login-input">
-                        <input type="password" name="password" placeholder="New password (leave blank)" class="login-input">
-                        <select name="role" class="login-input" style="max-width:120px">
-                            <option value="student" {{ 'selected' if u.role == 'student' }}>Student</option>
-                            <option value="teacher" {{ 'selected' if u.role == 'teacher' }}>Teacher</option>
-                            <option value="admin" {{ 'selected' if u.role == 'admin' }}>Admin</option>
-                        </select>
-                        <button type="submit" class="btn btn--primary">Save</button>
-                        <button type="button" class="btn btn--secondary" onclick="toggleEdit({{ u.id }})">Cancel</button>
-                    </div>
-                </form>
-                {% endif %}
-            </div>
-            {% endfor %}
+            <table class="user-table">
+                <thead>
+                    <tr>
+                        <th style="width:80px">Role</th>
+                        <th>User</th>
+                        <th style="width:100px">Created</th>
+                        <th style="width:72px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td><span class="role-badge role-badge--{{ u.role }}">{{ u.role }}</span></td>
+                        <td><strong>{{ u.display_name }}</strong> <span style="color:var(--text-dim)">@{{ u.username }}</span></td>
+                        <td style="color:var(--text-dim)">{{ u.created_at[:10] }}</td>
+                        <td style="text-align:right">
+                            {% if u.id != user.id %}
+                            <button class="btn btn--icon" onclick="openEditModal({{ u.id }}, '{{ u.display_name }}', '{{ u.username }}', '{{ u.role }}')" title="Edit" aria-label="Edit" style="color:var(--accent)">
+                                <svg width="18" height="18" viewBox="0 0 18 18"><path d="M11.5 3.5l3 3L6 15H3v-3L11.5 3.5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+                            </button>
+                            <form method="POST" action="/admin/users/{{ u.id }}/delete" style="display:inline" onsubmit="return confirm('Delete {{ u.username }}?')">
+                                <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete" style="color:var(--red)">
+                                    <svg width="18" height="18" viewBox="0 0 18 18"><path d="M5 5l8 8M13 5l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </main>
+</div>
+
+<!-- Create confirmation modal -->
+<div class="test-modal-overlay" id="confirm-overlay" onclick="if(event.target===this)closeModal('confirm-overlay')">
+    <div class="test-modal" role="dialog">
+        <button class="test-modal__close" onclick="closeModal('confirm-overlay')" aria-label="Close"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <h3 class="test-modal__title">Confirm New User</h3>
+        <div id="confirm-body" style="margin:16px 0;font-size:0.95rem;line-height:1.6"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn--secondary" onclick="closeModal('confirm-overlay')">Cancel</button>
+            <button class="btn btn--primary" id="confirm-submit">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit user modal -->
+<div class="test-modal-overlay" id="edit-overlay" onclick="if(event.target===this)closeModal('edit-overlay')">
+    <div class="test-modal" role="dialog">
+        <button class="test-modal__close" onclick="closeModal('edit-overlay')" aria-label="Close"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <h3 class="test-modal__title">Edit User</h3>
+        <form method="POST" id="edit-form" style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+            <div style="font-size:0.88rem;color:var(--text-muted)" id="edit-username-label"></div>
+            <input type="text" name="display_name" id="edit-display" placeholder="Display name" class="login-input">
+            <input type="password" name="password" placeholder="New password (leave blank to keep)" class="login-input">
+            <select name="role" id="edit-role" class="login-input">
+                <option value="student">Student</option>
+                <option value="teacher">Teacher</option>
+                <option value="admin">Admin</option>
+            </select>
+            <div style="display:flex;gap:10px;justify-content:flex-end">
+                <button type="button" class="btn btn--secondary" onclick="closeModal('edit-overlay')">Cancel</button>
+                <button type="submit" class="btn btn--primary">Save</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 <script>
@@ -91,9 +136,8 @@ function selectRole(btn) {
     btn.classList.add('role-toggle__btn--active');
     document.getElementById('cf-role').value = btn.getAttribute('data-role');
 }
-function toggleEdit(uid) {
-    var el = document.getElementById('edit-' + uid);
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+function closeModal(id) {
+    document.getElementById(id).classList.remove('test-modal-overlay--active');
 }
 function confirmCreate(e) {
     e.preventDefault();
@@ -101,8 +145,7 @@ function confirmCreate(e) {
     var dn = document.getElementById('cf-display').value || un;
     var role = document.getElementById('cf-role').value;
     document.getElementById('confirm-body').innerHTML =
-        '<strong>' + dn + '</strong> (@' + un + ')<br>' +
-        'Role: <span class="role-badge role-badge--' + role + '">' + role + '</span>';
+        '<strong>' + dn + '</strong> (@' + un + ')<br>Role: <span class="role-badge role-badge--' + role + '">' + role + '</span>';
     document.getElementById('confirm-submit').onclick = function() {
         document.getElementById('create-form').onsubmit = null;
         document.getElementById('create-form').submit();
@@ -110,8 +153,13 @@ function confirmCreate(e) {
     document.getElementById('confirm-overlay').classList.add('test-modal-overlay--active');
     return false;
 }
-function closeConfirm() {
-    document.getElementById('confirm-overlay').classList.remove('test-modal-overlay--active');
+function openEditModal(uid, displayName, username, role) {
+    document.getElementById('edit-form').action = '/admin/users/' + uid + '/edit';
+    document.getElementById('edit-display').value = displayName;
+    document.getElementById('edit-username-label').textContent = '@' + username;
+    document.getElementById('edit-role').value = role;
+    document.getElementById('edit-overlay').classList.add('test-modal-overlay--active');
 }
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeModal('confirm-overlay'); closeModal('edit-overlay'); } });
 </script>
 {% endblock %}

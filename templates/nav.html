@@ -56,13 +56,13 @@
         {% if user %}
         <div class="sidebar__user">
             <span class="sidebar__user-name">{{ user.display_name }}</span>
-            <span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>
+            {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>{% endif %}
         </div>
-        <a href="/account" class="sidebar__link sidebar__link--muted" aria-label="Account settings">
+        <a href="/account" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Account settings">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
             Account
         </a>
-        <a href="/logout" class="sidebar__link sidebar__link--muted" aria-label="Log out">
+        <a href="/logout" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Log out">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Log out
         </a>
@@ -70,7 +70,7 @@
         <div class="sidebar__user">
             <span class="sidebar__user-name">Guest</span>
         </div>
-        <a href="/login" class="sidebar__link" aria-label="Log in">
+        <a href="/login" class="sidebar__link sidebar__link--footer" aria-label="Log in">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4h2a1 1 0 011 1v10a1 1 0 01-1 1h-2M10 14l-4-4 4-4M6 10h8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Log in
         </a>
@@ -82,6 +82,12 @@
 <button class="hamburger" id="hamburger" onclick="document.getElementById('sidebar').classList.toggle('sidebar--open'); document.getElementById('sidebar-overlay').classList.toggle('sidebar-overlay--active')" aria-label="Open menu">
     <svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 </button>
+{% if announcement %}
+<div class="announcement-banner" id="announcement-banner">
+    <span class="announcement-banner__text">{{ announcement.content }}</span>
+    <span class="announcement-banner__meta">— {{ announcement.display_name }}, {{ announcement.created_at[:10] }}</span>
+</div>
+{% endif %}
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="document.getElementById('sidebar').classList.remove('sidebar--open'); this.classList.remove('sidebar-overlay--active')"></div>
 
 <script>
