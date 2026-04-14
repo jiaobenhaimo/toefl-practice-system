@@ -4,7 +4,7 @@
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
-    <main class="layout__main" style="max-width:960px">
+    <main class="layout__main">
         <h2 class="page-heading">Student Progress</h2>
 
         {% if not progress %}
@@ -14,7 +14,7 @@
         {% else %}
         <div class="results-list">
             {% for p in progress %}
-            <div class="progress-row">
+            <div class="progress-row" style="flex-wrap:wrap">
                 <div class="progress-row__info">
                     <strong>{{ p.student.display_name }}</strong>
                     <span style="color:var(--text-dim)">@{{ p.student.username }}</span>
@@ -28,6 +28,26 @@
                     {{ p.done }}/{{ p.total }}
                     <span style="color:var(--text-dim)">({{ p.pct }}%)</span>
                 </div>
+                {% if p.assignments %}
+                <details style="width:100%;margin-top:8px">
+                    <summary style="font-size:0.82rem;color:var(--text-muted);cursor:pointer">{{ p.assignments|length }} assignment(s)</summary>
+                    <div style="padding:8px 0 0 0">
+                        {% for a in p.assignments %}
+                        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.88rem">
+                            <span>{{ a.test_id }}{% if a.section %} · {{ a.section|capitalize }}{% endif %}</span>
+                            {% if a.due_date %}<span style="color:var(--text-dim)">Due {{ a.due_date|fmtdate }}</span>{% endif %}
+                            <span style="flex:1"></span>
+                            <form method="POST" action="/teacher/assign/{{ a.id }}/delete" style="margin:0" onsubmit="return confirm('Remove this assignment?')">
+                                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn--icon" style="width:28px;height:28px;min-width:28px;min-height:28px;color:var(--red)" title="Remove" aria-label="Remove assignment">
+                                    <svg width="14" height="14" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                </button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </details>
+                {% endif %}
             </div>
             {% endfor %}
         </div>

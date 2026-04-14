@@ -16,7 +16,7 @@
         </h2>
         <p class="result-meta">
             {{ result.display_name or result.username or 'Guest' }} &middot;
-            {{ result.date[:10] }}
+            {{ result.date|fmtdate_full }}
             {% if result.total_questions > 0 %}
             &middot; {{ result.total_correct }}/{{ result.total_questions }}
             ({{ (result.total_correct / result.total_questions * 100)|round|int }}%)

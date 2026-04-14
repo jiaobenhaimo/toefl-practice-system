@@ -96,6 +96,15 @@ Environment variables override config where applicable:
 
 Flask sessions with `werkzeug.security` password hashing. "Remember me" extends sessions to 31 days. A guest mode allows anonymous practice without login. API endpoints verify result ownership — students can only access their own data.
 
+### Security
+
+- **CSRF protection** on all form POST routes via session-based tokens. JSON API endpoints are exempt (used by the test engine and AJAX features).
+- **Login rate limiting**: 10 attempts per IP per 5-minute window.
+- **Session regeneration** on login to prevent session fixation.
+- **File upload limit**: 16MB max via `MAX_CONTENT_LENGTH`.
+- **Password minimum**: 6 characters enforced on change.
+- **Open redirect prevention**: login `next` parameter validates relative paths only.
+
 ### Server-side grading
 
 The `/api/module/` endpoint strips correct answers before sending questions to the client. When a student submits, `/api/grade` loads the test server-side, grades each question, and returns results. Answers never reach the browser.

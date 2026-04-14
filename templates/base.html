@@ -15,7 +15,7 @@
     // ===== i18n =====
     const I18N = {
         en: {
-            takeFullTest: 'Take Full Test',
+            takeFullTest: 'Full Test',
             fullTestDesc: 'All sections in order',
             chooseSection: 'Or choose a section:',
             clearProgress: 'Clear Saved Progress',
@@ -172,6 +172,60 @@
         });
     }
     document.addEventListener('DOMContentLoaded', updateThemeIcons);
+
+    // ===== Table sorting =====
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.user-table').forEach(function(table) {
+            var headers = table.querySelectorAll('th');
+            headers.forEach(function(th, colIdx) {
+                // Skip empty header columns (actions)
+                if (!th.textContent.trim()) return;
+                // Add sort arrow
+                var arrow = document.createElement('span');
+                arrow.className = 'sort-arrow';
+                arrow.textContent = ' ▲';
+                th.appendChild(arrow);
+                th.setAttribute('data-sort-dir', '');
+                th.addEventListener('click', function() {
+                    var dir = th.getAttribute('data-sort-dir') === 'asc' ? 'desc' : 'asc';
+                    // Reset all arrows in this table
+                    headers.forEach(function(h) {
+                        h.setAttribute('data-sort-dir', '');
+                        var a = h.querySelector('.sort-arrow');
+                        if (a) { a.textContent = ' ▲'; a.className = 'sort-arrow'; }
+                    });
+                    th.setAttribute('data-sort-dir', dir);
+                    arrow.textContent = dir === 'asc' ? ' ▲' : ' ▼';
+                    arrow.className = 'sort-arrow sort-arrow--active';
+                    // Sort rows
+                    var tbody = table.querySelector('tbody');
+                    if (!tbody) return;
+                    var rows = Array.from(tbody.querySelectorAll('tr'));
+                    rows.sort(function(a, b) {
+                        var aText = (a.children[colIdx] ? a.children[colIdx].textContent : '').trim().toLowerCase();
+                        var bText = (b.children[colIdx] ? b.children[colIdx].textContent : '').trim().toLowerCase();
+                        // Try numeric sort first
+                        var aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
+                        var bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return dir === 'asc' ? aNum - bNum : bNum - aNum;
+                        }
+                        // Try date sort (Mon DD, YYYY)
+                        var aDate = Date.parse(aText);
+                        var bDate = Date.parse(bText);
+                        if (!isNaN(aDate) && !isNaN(bDate)) {
+                            return dir === 'asc' ? aDate - bDate : bDate - aDate;
+                        }
+                        // Fallback: string sort
+                        if (aText < bText) return dir === 'asc' ? -1 : 1;
+                        if (aText > bText) return dir === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                    rows.forEach(function(row) { tbody.appendChild(row); });
+                });
+            });
+        });
+    });
     </script>
 </body>
 </html>

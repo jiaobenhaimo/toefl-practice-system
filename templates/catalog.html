@@ -44,6 +44,18 @@
 
 <script>
 var _testData = {{ tests|tojson }};
+
+function formatTime(mins) {
+    if (mins >= 60) {
+        var h = Math.floor(mins / 60);
+        var m = mins % 60;
+        var str = h + 'h';
+        if (m > 0) str += ' ' + m + ' min';
+        return str;
+    }
+    return mins + ' min';
+}
+
 function openTestModal(testId) {
     var test = _testData[testId];
     if (!test) return;
@@ -59,10 +71,16 @@ function openTestModal(testId) {
     }).join('');
     document.getElementById('modal-chips').innerHTML = chipsHtml;
 
+    // Total time for full test
+    var fullTime = 0;
+    test.modules.forEach(function(m) { fullTime += m.timer_minutes; });
+
     // Options
     var html = '<a href="/test/' + testId + '?mode=full" class="test-modal__option test-modal__option--full">';
     html += '<span class="test-modal__option-icon">ALL</span>';
-    html += '<div><div class="test-modal__option-label">Take Full Test</div></div></a>';
+    html += '<div style="flex:1"><div class="test-modal__option-label">Full Test</div></div>';
+    html += '<span class="test-modal__option-time">' + formatTime(fullTime) + '</span>';
+    html += '</a>';
 
     html += '<div class="test-modal__divider"></div>';
 
@@ -71,8 +89,9 @@ function openTestModal(testId) {
         test.modules.forEach(function(m) { if (m.section === sec) totalTime += m.timer_minutes; });
         html += '<a href="/test/' + testId + '?mode=section&section=' + sec + '" class="test-modal__option">';
         html += '<span class="test-modal__option-icon" style="color:var(--' + sec + ')">' + sec.charAt(0).toUpperCase() + '</span>';
-        html += '<div><div class="test-modal__option-label">' + sec.charAt(0).toUpperCase() + sec.slice(1) + '</div>';
-        html += '<div class="test-modal__option-desc">' + totalTime + ' min</div></div></a>';
+        html += '<div style="flex:1"><div class="test-modal__option-label">' + sec.charAt(0).toUpperCase() + sec.slice(1) + '</div></div>';
+        html += '<span class="test-modal__option-time">' + formatTime(totalTime) + '</span>';
+        html += '</a>';
     });
     document.getElementById('modal-options').innerHTML = html;
     document.getElementById('test-modal-overlay').classList.add('test-modal-overlay--active');

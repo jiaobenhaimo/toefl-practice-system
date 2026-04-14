@@ -15,6 +15,7 @@
         <div class="login-error">{{ error }}</div>
         {% endif %}
         <form method="POST" class="login-form">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <input type="text" name="username" placeholder="Username" required autofocus autocomplete="username" class="login-input" aria-label="Username">
             <input type="password" name="password" placeholder="Password" required autocomplete="current-password" class="login-input" aria-label="Password">
             <label class="login-remember">

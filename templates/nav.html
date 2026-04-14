@@ -89,7 +89,7 @@
 {% if announcement %}
 <div class="announcement-banner" id="announcement-banner">
     <span class="announcement-banner__text">{{ announcement.content }}</span>
-    <span class="announcement-banner__meta">— {{ announcement.display_name }}, {{ announcement.created_at[:10] }}</span>
+    <span class="announcement-banner__meta">— {{ announcement.display_name }}, {{ announcement.created_at|fmtdate }}</span>
 </div>
 {% endif %}
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="document.getElementById('sidebar').classList.remove('sidebar--open'); this.classList.remove('sidebar-overlay--active')"></div>

@@ -8,7 +8,7 @@
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
-    <main class="layout__main" style="max-width:960px">
+    <main class="layout__main">
         <h2 class="page-heading">Dashboard</h2>
 
         {% if students %}
@@ -23,7 +23,8 @@
         {% endif %}
 
         <div id="dashboard-empty" class="catalog-empty" {% if not students %}style="display:none"{% endif %}>
-            <p>{% if students %}Select a student above to view analytics.{% else %}Take some tests to see your analytics here.{% endif %}</p>
+            <p>{% if students %}Select a student above to view analytics.{% else %}No test results yet.{% endif %}</p>
+            <p class="catalog-empty__hint">{% if students %}Choose a student to see their score trends and weakest areas.{% else %}Complete a test and your analytics will appear here.{% endif %}</p>
         </div>
 
         <div id="dashboard-content" style="display:none">
@@ -73,7 +74,10 @@ function loadAnalytics() {
         if (!data.score_history || data.score_history.length === 0) {
             document.getElementById('dashboard-content').style.display = 'none';
             document.getElementById('dashboard-empty').style.display = '';
-            document.getElementById('dashboard-empty').querySelector('p').textContent = 'No test results yet.';
+            var emptyEl = document.getElementById('dashboard-empty');
+            emptyEl.querySelector('p').textContent = 'No test results yet.';
+            var hint = emptyEl.querySelector('.catalog-empty__hint');
+            if (hint) hint.textContent = 'Complete a test and your analytics will appear here.';
             return;
         }
         document.getElementById('dashboard-content').style.display = '';

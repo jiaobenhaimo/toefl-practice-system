@@ -19,7 +19,7 @@
                     <tr>
                         <th>Test</th>
                         <th style="width:100px">Score</th>
-                        <th style="width:90px">Date</th>
+                        <th style="width:130px">Date</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -35,12 +35,19 @@
                             ({{ (r.total_correct / r.total_questions * 100)|round|int }}%)
                             {% endif %}
                         </td>
-                        <td style="color:var(--text-dim)">{{ r.date[:10] }}</td>
+                        <td style="color:var(--text-dim)">{{ r.date|fmtdate }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        {% if total_pages > 1 %}
+        <div class="pagination">
+            {% if page > 1 %}<a href="?page={{ page - 1 }}" class="btn btn--secondary btn--sm">&larr; Previous</a>{% endif %}
+            <span class="pagination__info">Page {{ page }} of {{ total_pages }}</span>
+            {% if page < total_pages %}<a href="?page={{ page + 1 }}" class="btn btn--secondary btn--sm">Next &rarr;</a>{% endif %}
+        </div>
+        {% endif %}
         {% endif %}
     </main>
 </div>

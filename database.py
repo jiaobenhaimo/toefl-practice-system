@@ -234,8 +234,8 @@ def get_result_by_id(result_id):
     return dict(row) if row else None
 
 
-def get_results(user_id=None, test_id=None, limit=100):
-    """Get test results, optionally filtered."""
+def get_results(user_id=None, test_id=None, limit=50, offset=0):
+    """Get test results, optionally filtered, with pagination (#6)."""
     conn = get_db()
     query = "SELECT r.*, u.display_name, u.username FROM test_results r LEFT JOIN users u ON r.user_id = u.id WHERE 1=1"
     params = []
@@ -245,11 +245,27 @@ def get_results(user_id=None, test_id=None, limit=100):
     if test_id:
         query += " AND r.test_id=?"
         params.append(test_id)
-    query += " ORDER BY r.date DESC LIMIT ?"
-    params.append(limit)
+    query += " ORDER BY r.date DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def count_results(user_id=None, test_id=None):
+    """Count total results for pagination."""
+    conn = get_db()
+    query = "SELECT COUNT(*) FROM test_results WHERE 1=1"
+    params = []
+    if user_id is not None:
+        query += " AND user_id=?"
+        params.append(user_id)
+    if test_id:
+        query += " AND test_id=?"
+        params.append(test_id)
+    count = conn.execute(query, params).fetchone()[0]
+    conn.close()
+    return count
 
 
 # ===== Test assignments =====

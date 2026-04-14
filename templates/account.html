@@ -24,6 +24,7 @@
         <div class="card">
             <h3 class="card__title">Change Password</h3>
             <form method="POST" action="/account" style="display:flex;flex-direction:column;gap:12px">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <input type="password" name="old_password" placeholder="Current password" required class="login-input" autocomplete="current-password">
                 <input type="password" name="new_password" placeholder="New password" required class="login-input" autocomplete="new-password">
                 <input type="password" name="confirm_password" placeholder="Confirm new password" required class="login-input" autocomplete="new-password">

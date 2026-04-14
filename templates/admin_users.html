@@ -4,7 +4,7 @@
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
-    <main class="layout__main" style="max-width:960px">
+    <main class="layout__main">
         <h2 class="page-heading">Manage Users</h2>
 
         {% with messages = get_flashed_messages() %}
@@ -16,6 +16,7 @@
         <div class="card" style="margin-bottom:16px">
             <h3 class="card__title">Create User</h3>
             <form method="POST" action="/admin/users/create" id="create-form" onsubmit="return confirmCreate(event)">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <div class="form-row" style="margin-bottom:12px">
                     <input type="text" name="username" placeholder="Username" required class="login-input" id="cf-username">
                     <input type="text" name="display_name" placeholder="Display name" class="login-input" id="cf-display">
@@ -37,6 +38,7 @@
             <div class="card" style="flex:1;min-width:260px">
                 <h3 class="card__title">Bulk Import</h3>
                 <form method="POST" action="/admin/users/import" enctype="multipart/form-data" class="form-row" style="align-items:center">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                     <input type="file" name="csv_file" accept=".csv" required class="login-input" style="padding:8px">
                     <button type="submit" class="btn btn--secondary">Import</button>
                 </form>
@@ -47,11 +49,13 @@
                 <div style="background:var(--accent-dim);padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:10px;font-size:0.88rem;display:flex;align-items:center;gap:8px">
                     <span style="flex:1">{{ announcement.content }}</span>
                     <form method="POST" action="/admin/announcement/dismiss" style="margin:0">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn--icon" style="color:var(--red)" title="Dismiss">✕</button>
                     </form>
                 </div>
                 {% endif %}
                 <form method="POST" action="/admin/announcement" class="form-row" style="align-items:center">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                     <input type="text" name="content" placeholder="Type announcement..." required class="login-input">
                     <button type="submit" class="btn btn--secondary">Post</button>
                 </form>
@@ -65,8 +69,8 @@
                     <tr>
                         <th style="width:80px">Role</th>
                         <th>User</th>
-                        <th style="width:120px">Created</th>
-                        <th style="width:100px"></th>
+                        <th style="width:140px">Created</th>
+                        <th style="width:80px"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -74,16 +78,17 @@
                     <tr>
                         <td><span class="role-badge role-badge--{{ u.role }}">{{ u.role }}</span></td>
                         <td><strong>{{ u.display_name }}</strong> <span style="color:var(--text-dim)">@{{ u.username }}</span></td>
-                        <td style="color:var(--text-muted)">{{ u.created_at[:10] }}</td>
+                        <td style="color:var(--text-muted)">{{ u.created_at|fmtdate }}</td>
                         <td>
                             {% if u.id != user.id %}
                             <div class="user-table__actions">
                                 <button class="btn btn--icon" onclick="openEditModal({{ u.id }}, {{ u.display_name|tojson }}, {{ u.username|tojson }}, {{ u.role|tojson }})" title="Edit" aria-label="Edit" style="color:var(--accent)">
-                                    <svg width="20" height="20" viewBox="0 0 20 20"><path d="M12.5 4.5l3 3L7 16H4v-3L12.5 4.5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+                                    <svg width="16" height="16" viewBox="0 0 20 20"><path d="M12.5 4.5l3 3L7 16H4v-3L12.5 4.5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
                                 </button>
                                 <form method="POST" action="/admin/users/{{ u.id }}/delete" style="display:inline;margin:0" onsubmit="return confirm('Delete {{ u.username }}?')">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete" style="color:var(--red)">
-                                        <svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                        <svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                                     </button>
                                 </form>
                             </div>
@@ -100,7 +105,7 @@
 <!-- Create confirmation modal -->
 <div class="test-modal-overlay" id="confirm-overlay" onclick="if(event.target===this)closeModal('confirm-overlay')">
     <div class="test-modal" role="dialog">
-        <button class="test-modal__close" onclick="closeModal('confirm-overlay')" aria-label="Close"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <button class="test-modal__close" onclick="closeModal('confirm-overlay')" aria-label="Close"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         <h3 class="test-modal__title">Confirm New User</h3>
         <div id="confirm-body" style="margin:16px 0;font-size:0.95rem;line-height:1.6"></div>
         <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -113,9 +118,10 @@
 <!-- Edit user modal -->
 <div class="test-modal-overlay" id="edit-overlay" onclick="if(event.target===this)closeModal('edit-overlay')">
     <div class="test-modal" role="dialog">
-        <button class="test-modal__close" onclick="closeModal('edit-overlay')" aria-label="Close"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <button class="test-modal__close" onclick="closeModal('edit-overlay')" aria-label="Close"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         <h3 class="test-modal__title">Edit User</h3>
         <form method="POST" id="edit-form" style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <div style="font-size:0.88rem;color:var(--text-muted)" id="edit-username-label"></div>
             <input type="text" name="display_name" id="edit-display" placeholder="Display name" class="login-input">
             <input type="password" name="password" placeholder="New password (leave blank to keep)" class="login-input" autocomplete="new-password">

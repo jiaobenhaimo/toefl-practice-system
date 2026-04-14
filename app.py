@@ -2,7 +2,7 @@
 app.py — Flask application for TOEFL Practice Test System.
 Auth, admin, teacher dashboards, server-side grading.
 """
-import os, json, secrets, re, markdown, yaml
+import os, json, secrets, re, markdown, yaml, time, copy
 from functools import wraps
 from flask import (
     Flask, render_template, jsonify, request, session,
@@ -19,6 +19,7 @@ with open(_config_path) as f:
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['PERMANENT_SESSION_LIFETIME'] = 60 * 60 * 24 * 31
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB upload limit (#13)
 
 @app.context_processor
 def inject_config():
@@ -26,12 +27,72 @@ def inject_config():
     announcement = db.get_active_announcement()
     return {'site': SITE_CONFIG.get('site', {}), 'config': SITE_CONFIG, 'announcement': announcement}
 
+# Date formatting filters
+_MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December']
+_MONTHS_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+@app.template_filter('fmtdate')
+def filter_fmtdate(datestr):
+    """Format ISO date as 'Apr 14, 2026' (abbreviated month for tables)."""
+    if not datestr or len(datestr) < 10: return datestr or ''
+    try:
+        y, m, d = int(datestr[:4]), int(datestr[5:7]), int(datestr[8:10])
+        return f'{_MONTHS_ABBR[m-1]} {d}, {y}'
+    except Exception: return datestr[:10]
+
+@app.template_filter('fmtdate_full')
+def filter_fmtdate_full(datestr):
+    """Format ISO date as 'April 14, 2026' (full month for display)."""
+    if not datestr or len(datestr) < 10: return datestr or ''
+    try:
+        y, m, d = int(datestr[:4]), int(datestr[5:7]), int(datestr[8:10])
+        return f'{_MONTHS_FULL[m-1]} {d}, {y}'
+    except Exception: return datestr[:10]
+
 TESTS_DIR = os.environ.get('TOEFL_TESTS_DIR',
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tests'))
 
-_md = markdown.Markdown(extensions=['tables', 'nl2br'])
+# NOTE: _parse_cache and _scan_cache are per-process. Under gunicorn with
+# multiple workers, each worker maintains its own cache. This means file
+# changes may take up to one request per worker to propagate. For single-
+# process deployments (dev server, gunicorn -w 1) this is fine. (#11)
 _parse_cache = {}
 _scan_cache = {'mtime': 0, 'count': -1, 'result': None}
+
+# ===== CSRF Protection (#1) =====
+def _csrf_token():
+    """Get or create a CSRF token for the current session."""
+    if '_csrf' not in session:
+        session['_csrf'] = secrets.token_hex(16)
+    return session['_csrf']
+
+@app.context_processor
+def inject_csrf():
+    return {'csrf_token': _csrf_token}
+
+@app.before_request
+def csrf_check():
+    """Validate CSRF token on all POST requests from forms (not JSON APIs)."""
+    if request.method == 'POST' and request.content_type != 'application/json':
+        token = request.form.get('_csrf', '')
+        if not token or token != session.get('_csrf'):
+            abort(403)
+
+# ===== Login Rate Limiting (#2) =====
+_login_attempts = {}  # {ip: [(timestamp, ...)] }
+_RATE_LIMIT_WINDOW = 300  # 5 minutes
+_RATE_LIMIT_MAX = 10  # max attempts per window
+
+def _check_rate_limit(ip):
+    """Returns True if rate limited."""
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+    _login_attempts[ip] = attempts
+    return len(attempts) >= _RATE_LIMIT_MAX
+
+def _record_attempt(ip):
+    _login_attempts.setdefault(ip, []).append(time.time())
 
 # ===== Helpers =====
 
@@ -59,15 +120,21 @@ def _cached_scan():
     return r
 
 def md_html(text):
-    h = _md.convert(text); _md.reset(); return h
+    """Thread-safe markdown conversion (#3)."""
+    md = markdown.Markdown(extensions=['tables', 'nl2br'])
+    return md.convert(text)
 
 def pages_to_html(pages):
+    """Convert markdown fields to HTML. Deep-copies to avoid mutating cache (#10)."""
+    result = []
     for p in pages:
+        cp = copy.deepcopy(p)
         for k in ('passage','prompt','content'):
-            if k in p: p[k+'_html'] = md_html(p[k])
-        if 'details' in p and 'context' in p['details']:
-            p['details']['context_html'] = md_html(p['details']['context'])
-    return pages
+            if k in cp: cp[k+'_html'] = md_html(cp[k])
+        if 'details' in cp and 'context' in cp['details']:
+            cp['details']['context_html'] = md_html(cp['details']['context'])
+        result.append(cp)
+    return result
 
 def safe_path(base, user_path):
     b = os.path.realpath(base)
@@ -105,12 +172,20 @@ def login():
     if session.get('user_id'): return redirect('/')
     error = None
     if request.method == 'POST':
+        ip = request.remote_addr or '0.0.0.0'
+        if _check_rate_limit(ip):
+            error = 'Too many login attempts. Please wait a few minutes.'
+            return render_template('login.html', error=error)
+        _record_attempt(ip)
         u = db.authenticate(request.form.get('username','').strip(), request.form.get('password',''))
         if u:
+            # Regenerate session to prevent fixation (#9)
+            remember = request.form.get('remember') == 'on'
+            session.clear()
             session['user_id'] = u['id']
             session['role'] = u['role']
             session['display_name'] = u['display_name']
-            if request.form.get('remember') == 'on': session.permanent = True
+            if remember: session.permanent = True
             nxt = request.args.get('next', '/')
             # Prevent open redirect — only allow relative paths
             if not nxt.startswith('/') or nxt.startswith('//'):
@@ -268,6 +343,7 @@ def admin_create_user():
     un = request.form.get('username','').strip()
     pw = request.form.get('password','')
     if not un or not pw: flash('Username and password required'); return redirect('/admin/users')
+    if len(pw) < 6: flash('Password must be at least 6 characters'); return redirect('/admin/users')
     try:
         db.create_user(un, pw, request.form.get('role','student'), request.form.get('display_name','').strip())
         flash(f'User "{un}" created')
@@ -291,6 +367,8 @@ def admin_edit_user(uid):
     # Prevent admin from changing their own role (could lock out the last admin)
     if uid == session.get('user_id') and new_role and new_role != 'admin':
         flash('Cannot change your own role'); return redirect('/admin/users')
+    if pw and len(pw) < 6:
+        flash('Password must be at least 6 characters'); return redirect('/admin/users')
     db.update_user(uid, display_name=request.form.get('display_name'),
         password=pw or None, role=new_role)
     flash('User updated'); return redirect('/admin/users')
@@ -306,19 +384,27 @@ def admin_import_users():
         text = f.read().decode('utf-8-sig')
         reader = csv.DictReader(io.StringIO(text))
         users = []
+        pw_errors = []
         for row in reader:
             un = (row.get('username') or '').strip()
             pw = (row.get('password') or '').strip()
             if un and pw:
+                if len(pw) < 6:
+                    pw_errors.append(f'{un}: password too short (min 6)')
+                    continue
                 users.append({
                     'username': un, 'password': pw,
                     'role': (row.get('role') or 'student').strip(),
                     'display_name': (row.get('display_name') or un).strip(),
                 })
-        if not users: flash('No valid rows found in CSV'); return redirect('/admin/users')
-        created, errors = db.bulk_create_users(users)
+        if not users and not pw_errors: flash('No valid rows found in CSV'); return redirect('/admin/users')
+        if users:
+            created, db_errors = db.bulk_create_users(users)
+        else:
+            created, db_errors = 0, []
+        all_errors = pw_errors + db_errors
         msg = f'{created} user(s) created'
-        if errors: msg += f', {len(errors)} error(s): ' + '; '.join(errors[:3])
+        if all_errors: msg += f', {len(all_errors)} error(s): ' + '; '.join(all_errors[:3])
         flash(msg)
     except Exception as e:
         flash(f'Import error: {e}')
@@ -348,8 +434,14 @@ def admin_dismiss_announcement():
 @require_login
 @require_role('admin','teacher')
 def teacher_results():
-    return render_template('teacher_results.html', results=db.get_results(),
-        students=db.list_users(role='student'), tests=_cached_scan(), user=cur_user())
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    total = db.count_results()
+    results = db.get_results(limit=per_page, offset=(page-1)*per_page)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return render_template('teacher_results.html', results=results,
+        students=db.list_users(role='student'), tests=_cached_scan(), user=cur_user(),
+        page=page, total_pages=total_pages)
 
 @app.route('/teacher/assign', methods=['POST'])
 @require_login
@@ -362,6 +454,15 @@ def teacher_assign():
     if sid and tid: db.assign_test(cur_user()['id'], sid, tid, sec, due); flash('Test assigned')
     return redirect('/teacher/results')
 
+@app.route('/teacher/assign/<int:aid>/delete', methods=['POST'])
+@require_login
+@require_role('admin','teacher')
+def teacher_remove_assignment(aid):
+    """Remove a test assignment (#4)."""
+    db.remove_assignment(aid)
+    flash('Assignment removed')
+    return redirect('/teacher/progress')
+
 @app.route('/teacher/progress')
 @require_login
 @require_role('admin','teacher')
@@ -370,13 +471,20 @@ def teacher_progress():
     progress_data = []
     for s in students:
         assignments = db.get_assignments(student_id=s['id'])
-        results = db.get_results(user_id=s['id'])
+        results = db.get_results(user_id=s['id'], limit=10000)  # Need all for progress check
+        # Build set of completed (test_id, section|None) tuples (#5)
         completed_keys = set()
         for r in results:
             if not r['practice']:
-                completed_keys.add(r['test_id'])
+                try:
+                    secs = json.loads(r['sections_json']) if r['sections_json'] else []
+                except Exception: secs = []
+                completed_sections = {sec.get('section') for sec in secs}
+                completed_keys.add((r['test_id'], None))  # full test
+                for cs in completed_sections:
+                    completed_keys.add((r['test_id'], cs))
         total = len(assignments)
-        done = sum(1 for a in assignments if a['test_id'] in completed_keys)
+        done = sum(1 for a in assignments if (a['test_id'], a.get('section')) in completed_keys)
         progress_data.append({
             'student': s,
             'total': total,
@@ -400,8 +508,8 @@ def account():
             flash('Current password is incorrect')
         elif new_pw != confirm_pw:
             flash('New passwords do not match')
-        elif len(new_pw) < 1:
-            flash('New password cannot be empty')
+        elif len(new_pw) < 6:
+            flash('New password must be at least 6 characters')
         else:
             db.update_user(u['id'], password=new_pw)
             flash('Password changed successfully')
@@ -426,7 +534,13 @@ def result_detail(result_id):
 @require_login
 def history_page():
     u = cur_user()
-    return render_template('history.html', results=db.get_results(user_id=u['id']), user=u)
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    total = db.count_results(user_id=u['id'])
+    results = db.get_results(user_id=u['id'], limit=per_page, offset=(page-1)*per_page)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return render_template('history.html', results=results, user=u,
+        page=page, total_pages=total_pages)
 
 # ===== Notes API =====
 
@@ -521,20 +635,25 @@ def api_save_comment(result_id):
 def api_get_explanations(test_id):
     # Merge: markdown-based explanations (from parsed test) + DB explanations
     db_expl = db.get_explanations(test_id)
-    # Try to get markdown explanations from parsed test
+    # Get markdown explanations from ALL test files (#12)
     tests = _cached_scan()
     md_expl = {}
     if test_id in tests:
         t = tests[test_id]
-        fp = safe_path(TESTS_DIR, t['modules'][0]['filename']) if t['modules'] else None
-        if fp and os.path.exists(fp):
-            parsed = _cached_parse(fp)
-            for mod in parsed['modules']:
-                pages = build_question_list(mod)
-                for pg in pages:
-                    qid = str(pg.get('question_id', ''))
-                    if pg.get('explanation'):
-                        md_expl[qid] = md_html(pg['explanation'])
+        seen_files = set()
+        for mod_info in t['modules']:
+            fn = mod_info['filename']
+            if fn in seen_files: continue
+            seen_files.add(fn)
+            fp = safe_path(TESTS_DIR, fn)
+            if fp and os.path.exists(fp):
+                parsed = _cached_parse(fp)
+                for mod in parsed['modules']:
+                    pages = build_question_list(mod)
+                    for pg in pages:
+                        qid = str(pg.get('question_id', ''))
+                        if pg.get('explanation'):
+                            md_expl[qid] = md_html(pg['explanation'])
     # DB explanations override markdown
     merged = {**md_expl}
     for qid, expl in db_expl.items():
@@ -563,7 +682,7 @@ def teacher_batch_export():
     if not student_ids: flash('No students selected'); return redirect('/teacher/results')
     all_results = []
     for sid in student_ids:
-        results = db.get_results(user_id=sid)
+        results = db.get_results(user_id=sid, limit=10000)  # Export all, no pagination
         all_results.extend(results)
     if fmt == 'csv':
         buf = io.StringIO()
@@ -573,7 +692,7 @@ def teacher_batch_export():
             pct = round(r['total_correct']/r['total_questions']*100) if r['total_questions']>0 else ''
             writer.writerow([r.get('display_name',''), r.get('username',''), r.get('test_name',''),
                 r['total_correct'], r['total_questions'], pct,
-                'Yes' if r['practice'] else 'No', r['date'][:10]])
+                'Yes' if r['practice'] else 'No', filter_fmtdate(r['date'])])
         output = io.BytesIO(buf.getvalue().encode('utf-8-sig'))
         return send_file(output, mimetype='text/csv', download_name='results_export.csv', as_attachment=True)
     flash('Unsupported format'); return redirect('/teacher/results')
