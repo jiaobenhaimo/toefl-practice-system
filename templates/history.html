@@ -24,7 +24,7 @@
                 </thead>
                 <tbody>
                     {% for r in results %}
-                    <tr onclick="location.href='/results/{{ r.id }}'" style="cursor:pointer">
+                    <tr class="result-row--clickable" onclick="location.href='/results/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/results/{{ r.id }}'">
                         <td>
                             <strong>{{ r.test_name or r.test_id }}</strong>
                             {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}

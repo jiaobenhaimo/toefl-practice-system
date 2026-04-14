@@ -11,7 +11,7 @@
 ## 部署
 
 ```bash
-git clone <repo-url> && cd toefl-practice-system
+git clone https://github.com/jiaobenhaimo/toefl-practice-system.git && cd toefl-practice-system
 
 python -m venv venv
 source venv/bin/activate

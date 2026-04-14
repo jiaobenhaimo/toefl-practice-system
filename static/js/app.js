@@ -29,6 +29,7 @@ let audioPlaying = false;   // True while audio is playing (blocks Next in liste
 let cachedMicStream = null; // Reuse mic stream across speaking questions
 let bookmarkedQuestions = new Set(); // Bookmarked question indices (reading only)
 let isPracticeMode = false;         // Practice mode: replay audio, instant feedback
+let timerPaused = false;            // Timer pause state (practice mode only)
 
 
 let questionTimes = {};             // { qid: seconds spent }
@@ -281,6 +282,7 @@ function startTimer() {
         return;
     }
     timerInterval = setInterval(() => {
+        if (timerPaused) return;  // Skip tick when paused
         timerSecondsLeft--;
         updateTimerDisplay();
         if (timerSecondsLeft <= 0) {
@@ -293,6 +295,23 @@ function startTimer() {
 function stopTimer() {
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = null;
+    timerPaused = false;
+}
+
+function togglePause() {
+    if (!isPracticeMode) return;
+    timerPaused = !timerPaused;
+    const btn = document.getElementById('btn-pause');
+    const icon = document.getElementById('pause-icon');
+    if (timerPaused) {
+        icon.innerHTML = '<polygon points="6,4 17,10 6,16" fill="currentColor"/>';
+        btn.title = 'Resume timer';
+        document.getElementById('timer').style.opacity = '0.5';
+    } else {
+        icon.innerHTML = '<rect x="5" y="4" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="11.5" y="4" width="3.5" height="12" rx="1" fill="currentColor"/>';
+        btn.title = 'Pause timer';
+        document.getElementById('timer').style.opacity = '1';
+    }
 }
 
 function updateTimerDisplay() {
@@ -357,6 +376,12 @@ function renderQuestion() {
     if (btnBookmark) {
         btnBookmark.style.display = (section === 'reading') ? '' : 'none';
         btnBookmark.classList.toggle('btn-bookmark--active', bookmarkedQuestions.has(currentPageIdx));
+    }
+
+    // Pause button: practice mode only
+    const btnPause = document.getElementById('btn-pause');
+    if (btnPause) {
+        btnPause.style.display = isPracticeMode ? '' : 'none';
     }
 
     // Next button text
@@ -1491,7 +1516,26 @@ window.addEventListener('beforeunload', (e) => {
 document.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea') return;
-    if (!currentModule || audioPlaying) return;
+    if (!currentModule) return;
+
+    // Arrow keys for navigation (all sections)
+    if (e.key === 'ArrowRight' || e.key === 'Enter') {
+        if (!audioPlaying && !e.repeat) {
+            e.preventDefault();
+            nextQuestion();
+        }
+        return;
+    }
+    if (e.key === 'ArrowLeft') {
+        if (currentModule.section === 'reading' && currentPageIdx > 0) {
+            e.preventDefault();
+            prevQuestion();
+        }
+        return;
+    }
+
+    // A/B/C/D for multiple choice
+    if (audioPlaying) return;
     const page = currentModule.pages[currentPageIdx];
     if (!page || page.question_type !== 'mc') return;
 

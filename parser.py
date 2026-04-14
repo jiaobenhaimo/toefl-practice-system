@@ -19,8 +19,8 @@ _RE_CONTEXT = re.compile(r'\*\*Context:\*\*\s*(.+)')
 _RE_WORDS = re.compile(r'\*\*Words:\*\*\s*(.+)')
 _RE_GROUP_OPEN = re.compile(r'\[group\s+title="(.+?)"\]')
 _RE_AUDIO = re.compile(r'\[audio\s+src="(.+?)"\]')
-_RE_BLOCK_OPEN = re.compile(r'\[(passage|transcript|question)\s*(.*?)\]$')
-_RE_BLOCK_CLOSE = re.compile(r'\[/(passage|transcript|question)\]')
+_RE_BLOCK_OPEN = re.compile(r'\[(passage|transcript|question|explanation)\s*(.*?)\]$')
+_RE_BLOCK_CLOSE = re.compile(r'\[/(passage|transcript|question|explanation)\]')
 _RE_MODULE = re.compile(r'\[module\s+(.*?)\](.*?)\[/module\]', re.DOTALL)
 _RE_MODULE_ATTRS = re.compile(r'\[module\s+(.*?)\]')
 _RE_CLOZE_BLANK = re.compile(r'(\w*)\[(\d+)\](\w*)')
@@ -110,6 +110,12 @@ def parse_groups(lines_text):
                 elif qtype == 'build_sentence':
                     q['details'] = parse_build_sentence(content)
                 current_group['items'].append({'type': 'question', 'data': q})
+            elif current_block_type == 'explanation':
+                # Attach explanation to the most recent question
+                for item in reversed(current_group['items']):
+                    if item['type'] == 'question':
+                        item['data']['explanation'] = content
+                        break
         current_block_type = None
         current_block_attrs = None
         current_block_lines = []
@@ -343,6 +349,10 @@ def build_question_list(module_data):
             elif qtype in ('listen_repeat', 'interview'):
                 page['content'] = q.get('content', '')
                 page['time_seconds'] = int(q.get('time_seconds', 30))
+
+            # Explanation (from [explanation] block in markdown)
+            if q.get('explanation'):
+                page['explanation'] = q['explanation']
 
             pages.append(page)
             # pending_audio persists until the next [audio] block resets it

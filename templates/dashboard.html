@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ site.name }}{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main" style="max-width:960px">
+        <h2 class="page-heading">Dashboard</h2>
+
+        {% if students %}
+        <div class="form-row" style="margin-bottom:20px">
+            <select id="student-select" class="login-input" style="flex:1;max-width:320px" onchange="loadAnalytics()" aria-label="Select a student">
+                <option value="">Select a student...</option>
+                {% for s in students %}
+                <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        <div id="dashboard-empty" class="catalog-empty" {% if not students %}style="display:none"{% endif %}>
+            <p>{% if students %}Select a student above to view analytics.{% else %}Take some tests to see your analytics here.{% endif %}</p>
+        </div>
+
+        <div id="dashboard-content" style="display:none">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+                <div class="card">
+                    <h3 class="card__title">Score Trend</h3>
+                    <canvas id="chart-trend" height="200"></canvas>
+                </div>
+                <div class="card">
+                    <h3 class="card__title">Section Breakdown</h3>
+                    <canvas id="chart-sections" height="200"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <h3 class="card__title">Weakest Areas</h3>
+                <div id="weakest-areas"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+var trendChart = null, sectionChart = null;
+var _uid = {{ user.id }};
+var _isStudent = {{ 'true' if user.role == 'student' else 'false' }};
+
+// Configure Chart.js colors from CSS variables (dark mode support)
+function getChartColors() {
+    var s = getComputedStyle(document.documentElement);
+    return {
+        text: s.getPropertyValue('--text').trim(),
+        muted: s.getPropertyValue('--text-muted').trim(),
+        grid: s.getPropertyValue('--border').trim(),
+        accent: s.getPropertyValue('--accent').trim(),
+    };
+}
+
+function chartScaleOpts() {
+    var c = getChartColors();
+    return { ticks: { color: c.muted }, grid: { color: c.grid + '33' } };
+}
+
+function loadAnalytics() {
+    var uid = _isStudent ? _uid : document.getElementById('student-select').value;
+    if (!uid) { document.getElementById('dashboard-content').style.display = 'none'; document.getElementById('dashboard-empty').style.display = ''; return; }
+    fetch('/api/analytics/' + uid).then(function(r){ return r.json(); }).then(function(data) {
+        if (!data.score_history || data.score_history.length === 0) {
+            document.getElementById('dashboard-content').style.display = 'none';
+            document.getElementById('dashboard-empty').style.display = '';
+            document.getElementById('dashboard-empty').querySelector('p').textContent = 'No test results yet.';
+            return;
+        }
+        document.getElementById('dashboard-content').style.display = '';
+        document.getElementById('dashboard-empty').style.display = 'none';
+        renderTrendChart(data.score_history);
+        renderSectionChart(data.section_breakdown);
+        renderWeakest(data.section_breakdown);
+    });
+}
+
+function renderTrendChart(history) {
+    var ctx = document.getElementById('chart-trend').getContext('2d');
+    if (trendChart) trendChart.destroy();
+    var c = getChartColors();
+    trendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: history.map(function(h){ return h.date; }),
+            datasets: [{
+                label: 'Score %',
+                data: history.map(function(h){ return h.pct; }),
+                borderColor: c.accent,
+                backgroundColor: 'transparent',
+                tension: 0.3,
+                pointRadius: 4,
+            }]
+        },
+        options: { responsive: true, scales: { y: Object.assign({ min: 0, max: 100 }, chartScaleOpts()), x: chartScaleOpts() }, plugins: { legend: { display: false } } }
+    });
+}
+
+function renderSectionChart(sections) {
+    var ctx = document.getElementById('chart-sections').getContext('2d');
+    if (sectionChart) sectionChart.destroy();
+    var s = getComputedStyle(document.documentElement);
+    var colors = {
+        reading: s.getPropertyValue('--reading').trim(),
+        listening: s.getPropertyValue('--listening').trim(),
+        writing: s.getPropertyValue('--writing').trim(),
+        speaking: s.getPropertyValue('--speaking').trim()
+    };
+    var c = getChartColors();
+    sectionChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: sections.map(function(sec){ return sec.section.charAt(0).toUpperCase() + sec.section.slice(1); }),
+            datasets: [{
+                data: sections.map(function(sec){ return sec.pct; }),
+                backgroundColor: sections.map(function(sec){ return colors[sec.section] || '#888'; }),
+                borderRadius: 6,
+            }]
+        },
+        options: { responsive: true, scales: { y: Object.assign({ min: 0, max: 100, ticks: { callback: function(v){ return v+'%'; }, color: c.muted } }, chartScaleOpts()), x: chartScaleOpts() }, plugins: { legend: { display: false } } }
+    });
+}
+
+function renderWeakest(sections) {
+    var sorted = sections.slice().filter(function(s){ return s.total > 0; }).sort(function(a,b){ return a.pct - b.pct; });
+    var el = document.getElementById('weakest-areas');
+    if (!sorted.length) { el.innerHTML = '<p style="color:var(--text-muted);padding:8px 0">Not enough data yet.</p>'; return; }
+    var html = '';
+    sorted.forEach(function(s) {
+        var label = s.section.charAt(0).toUpperCase() + s.section.slice(1);
+        html += '<div class="progress-row">';
+        html += '<div class="progress-row__info"><strong>' + label + '</strong></div>';
+        html += '<div class="progress-row__bar-wrap"><div class="progress-row__bar"><div class="progress-row__fill" style="width:' + s.pct + '%;background:var(--' + s.section + ')"></div></div></div>';
+        html += '<div class="progress-row__stat">' + s.correct + '/' + s.total + ' (' + s.pct + '%)</div>';
+        html += '</div>';
+    });
+    el.innerHTML = html;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (_isStudent) loadAnalytics();
+});
+</script>
+
+<style>
+@media (max-width: 640px) {
+    #dashboard-content > div:first-child { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}

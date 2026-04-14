@@ -35,7 +35,12 @@
                     </div>
                     {% endif %}
                 </div>
-                <div class="assignment-card__meta">Assigned {{ a.assigned_at[:10] }}</div>
+                <div class="assignment-card__meta">
+                    Assigned {{ a.assigned_at[:10] }}
+                    {% if a.due_date %}
+                    <span style="margin-left:8px;color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})">Due {{ a.due_date[:10] }}</span>
+                    {% endif %}
+                </div>
             </a>
             {% endif %}
             {% endfor %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Login — TOEFL Practice{% endblock %}
+{% block title %}Login — {{ site.name }}{% endblock %}
 
 {% block body %}
 <div class="login-page">
@@ -9,7 +9,7 @@
                 <rect width="28" height="28" rx="6" fill="var(--accent)"/>
                 <path d="M7 9h14M7 14h10M7 19h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
             </svg>
-            <span class="login-brand__title">TOEFL Practice</span>
+            <span class="login-brand__title">{{ site.name }}</span>
         </div>
         {% if error %}
         <div class="login-error">{{ error }}</div>

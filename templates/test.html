@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ test_info.test_name }} — TOEFL Practice{% endblock %}
+{% block title %}{{ test_info.test_name }} — {{ site.name }}{% endblock %}
 
 {% block head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -49,6 +49,9 @@
             </button>
             <button class="btn btn--icon btn-bookmark" id="btn-bookmark" onclick="toggleBookmark()" style="display:none" title="Bookmark this question" aria-label="Bookmark this question">
                 <svg width="20" height="20" viewBox="0 0 20 20" id="bookmark-icon"><path d="M5 3h10v14l-5-3-5 3V3z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="btn btn--icon" id="btn-pause" onclick="togglePause()" style="display:none" title="Pause timer" aria-label="Pause timer">
+                <svg width="20" height="20" viewBox="0 0 20 20" id="pause-icon"><rect x="5" y="4" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="11.5" y="4" width="3.5" height="12" rx="1" fill="currentColor"/></svg>
             </button>
             <div class="test-footer__spacer"></div>
             <button class="btn btn--primary" id="btn-next" onclick="nextQuestion()" aria-label="Next question">

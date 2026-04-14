@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS test_assignments (
     student_id INTEGER NOT NULL,
     test_id TEXT NOT NULL,
     section TEXT DEFAULT NULL,  -- NULL = full test, 'reading' = section only
+    due_date TEXT DEFAULT NULL, -- ISO date, NULL = no deadline
     assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (teacher_id) REFERENCES users(id),
     FOREIGN KEY (student_id) REFERENCES users(id)
@@ -66,6 +67,29 @@ CREATE TABLE IF NOT EXISTS student_notes (
     FOREIGN KEY (result_id) REFERENCES test_results(id),
     UNIQUE(user_id, result_id, question_id)
 );
+
+CREATE TABLE IF NOT EXISTS teacher_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER NOT NULL,
+    result_id INTEGER NOT NULL,
+    question_id TEXT DEFAULT NULL,  -- NULL = overall comment on the result
+    comment TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (teacher_id) REFERENCES users(id),
+    FOREIGN KEY (result_id) REFERENCES test_results(id),
+    UNIQUE(teacher_id, result_id, question_id)
+);
+
+CREATE TABLE IF NOT EXISTS question_explanations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    explanation TEXT NOT NULL DEFAULT '',
+    author_id INTEGER DEFAULT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (author_id) REFERENCES users(id),
+    UNIQUE(test_id, question_id)
+);
 """
 
 
@@ -83,6 +107,10 @@ def init_db(config=None):
     """Initialize database schema and create default accounts if needed."""
     conn = get_db()
     conn.executescript(SCHEMA)
+    # Migrate: add due_date to test_assignments if missing
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(test_assignments)").fetchall()]
+    if 'due_date' not in cols:
+        conn.execute("ALTER TABLE test_assignments ADD COLUMN due_date TEXT DEFAULT NULL")
     # Create default admin account if none exists
     admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
     if not admin:
@@ -170,8 +198,9 @@ def update_user(user_id, display_name=None, password=None, role=None):
 
 
 def delete_user(user_id):
-    """Delete user and their results, assignments, and notes."""
+    """Delete user and their results, assignments, notes, and comments."""
     conn = get_db()
+    conn.execute("DELETE FROM teacher_comments WHERE teacher_id=?", (user_id,))
     conn.execute("DELETE FROM student_notes WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_results WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_assignments WHERE student_id=? OR teacher_id=?", (user_id, user_id))
@@ -225,8 +254,8 @@ def get_results(user_id=None, test_id=None, limit=100):
 
 # ===== Test assignments =====
 
-def assign_test(teacher_id, student_id, test_id, section=None):
-    """Assign a test (or section) to a student."""
+def assign_test(teacher_id, student_id, test_id, section=None, due_date=None):
+    """Assign a test (or section) to a student with optional due date."""
     conn = get_db()
     existing = conn.execute(
         "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=? AND section IS ?",
@@ -234,8 +263,8 @@ def assign_test(teacher_id, student_id, test_id, section=None):
     ).fetchone()
     if not existing:
         conn.execute(
-            "INSERT INTO test_assignments (teacher_id, student_id, test_id, section) VALUES (?, ?, ?, ?)",
-            (teacher_id, student_id, test_id, section)
+            "INSERT INTO test_assignments (teacher_id, student_id, test_id, section, due_date) VALUES (?, ?, ?, ?, ?)",
+            (teacher_id, student_id, test_id, section, due_date)
         )
         conn.commit()
     conn.close()
@@ -343,3 +372,72 @@ def bulk_create_users(users_list):
     conn.commit()
     conn.close()
     return created, errors
+
+
+# ===== Teacher comments =====
+
+def get_teacher_comments(result_id):
+    """Get all teacher comments for a result. Returns dict with 'overall' and per-question keys."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT tc.*, u.display_name FROM teacher_comments tc JOIN users u ON tc.teacher_id=u.id "
+        "WHERE tc.result_id=? ORDER BY tc.updated_at DESC",
+        (result_id,)
+    ).fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        key = r['question_id'] if r['question_id'] else '_overall'
+        result[key] = {'comment': r['comment'], 'teacher': r['display_name'], 'updated_at': r['updated_at']}
+    return result
+
+
+def save_teacher_comment(teacher_id, result_id, question_id, comment):
+    """Save or update a teacher comment. question_id=None for overall comment."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO teacher_comments (teacher_id, result_id, question_id, comment) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(teacher_id, result_id, question_id) DO UPDATE SET comment=excluded.comment, updated_at=datetime('now')",
+        (teacher_id, result_id, question_id or None, comment)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===== Question explanations =====
+
+def get_explanations(test_id):
+    """Get all explanations for a test. Returns dict {question_id: explanation}."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT question_id, explanation FROM question_explanations WHERE test_id=?",
+        (test_id,)
+    ).fetchall()
+    conn.close()
+    return {r['question_id']: r['explanation'] for r in rows}
+
+
+def save_explanation(test_id, question_id, explanation, author_id=None):
+    """Save or update an explanation for a question."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO question_explanations (test_id, question_id, explanation, author_id) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(test_id, question_id) DO UPDATE SET explanation=excluded.explanation, author_id=excluded.author_id, updated_at=datetime('now')",
+        (test_id, question_id, explanation, author_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===== Analytics =====
+
+def get_analytics(user_id):
+    """Get analytics data for a student: score history, section breakdowns."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, test_id, test_name, practice, date, total_correct, total_questions, sections_json "
+        "FROM test_results WHERE user_id=? AND practice=0 ORDER BY date ASC",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

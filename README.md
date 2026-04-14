@@ -8,24 +8,6 @@ A web-based mock test platform with user authentication, server-side grading, ro
 
 ---
 
-## Changelog
-
-### v1.1
-
-**Bug fixes**
-
-- **Practice mode instant feedback**: Fixed a bug where multiple-choice instant feedback in practice mode was broken because the server was stripping correct answers before sending them to the client. Practice mode API calls now include answers so students can see instant correct/incorrect feedback.
-- **User deletion data cleanup**: Fixed `delete_user` to also remove associated records in the `student_notes` table. Previously, deleting a user left orphaned notes in the database.
-
-**UI improvements**
-
-- **Larger base font size**: Increased the root font size from 16px to 17px for improved readability across all pages.
-- **Users page (admin)**: Increased the "Created" column text size and widened the column. Edit and delete action icons are now larger (22px, up from 18px) for easier interaction.
-- **Results page (teacher)**: Drop-down menus in the "Assign Test" form now match the size of the Assign button (consistent padding and font size).
-- **Catalog cards**: Cards now use a 3:2 aspect ratio, fill horizontal space with `1fr` grid columns, show 4 cards per row on a 14" screen, and maintain a consistent height based on the aspect ratio rather than a fixed pixel value.
-
----
-
 ## Deployment
 
 ### Prerequisites
@@ -37,7 +19,7 @@ A web-based mock test platform with user authentication, server-side grading, ro
 ### Quick start
 
 ```bash
-git clone <repo-url> && cd toefl-practice-system
+git clone https://github.com/jiaobenhaimo/toefl-practice-system.git && cd toefl-practice-system
 
 python -m venv venv
 source venv/bin/activate        # macOS/Linux
@@ -80,7 +62,7 @@ test_types:                       # Define as many as needed
   toefl:
     label: "TOEFL iBT"
     sections:
-      reading: { label: Reading, color: "#3b6fe0" }
+      reading: { label: Reading, color: "#007aff" }
       ...
   ielts:
     label: "IELTS"
@@ -108,11 +90,11 @@ Environment variables override config where applicable:
 
 ### Storage
 
-**SQLite** (single file, no external server) stores three tables: `users` (accounts with hashed passwords), `test_results` (graded submissions), and `test_assignments` (teacher-to-student assignments with optional section scoping).
+**SQLite** (single file, no external server) stores seven tables: `users` (accounts with hashed passwords), `test_results` (graded submissions with per-section JSON details), `test_assignments` (teacher-to-student assignments with optional section scoping and due dates), `announcements` (site-wide banners), `student_notes` (per-question notes on results), `teacher_comments` (per-result and per-question teacher feedback), and `question_explanations` (teacher-authored explanations stored per test/question).
 
 ### Authentication
 
-Flask sessions with `werkzeug.security` password hashing. "Remember me" extends sessions to 31 days. A guest mode allows anonymous practice without login.
+Flask sessions with `werkzeug.security` password hashing. "Remember me" extends sessions to 31 days. A guest mode allows anonymous practice without login. API endpoints verify result ownership — students can only access their own data.
 
 ### Server-side grading
 
@@ -126,9 +108,9 @@ The `/api/module/` endpoint strips correct answers before sending questions to t
 
 | Role | Pages | Capabilities |
 |---|---|---|
-| **Admin** | Users, Results, Progress, Catalog | Manage accounts, view all results, assign tests |
-| **Teacher** | Results, Progress, Catalog | View results, assign tests (full or by section), track progress |
-| **Student** | Assignments, Catalog, History, Account | Take tests, view own results, change password |
+| **Admin** | Users, Results, Progress, Dashboard, Catalog | Manage accounts, view all results, assign tests, analytics |
+| **Teacher** | Results, Progress, Dashboard, Catalog | View results, assign tests (with due dates), teacher comments, analytics |
+| **Student** | Assignments, Dashboard, Catalog, History, Account | Take tests, view own analytics, view own results, change password |
 | **Guest** | Catalog | Practice anonymously (results not saved) |
 
 ---
@@ -138,22 +120,32 @@ The `/api/module/` endpoint strips correct answers before sending questions to t
 ### Test-taking
 
 - Seven question types: multiple choice, cloze (fill-in-the-blank), build-a-sentence, email, academic discussion, listen-and-repeat, interview
-- Practice mode: replayable audio, instant answer feedback (server sends answers to client in practice mode), clearly marked results
-- Timer with amber (5 min) and red (1 min) warnings
+- Practice mode: replayable audio, instant answer feedback, timer pause, clearly marked results
+- Timer with amber (5 min) and red (1 min) warnings; pause button in practice mode
 - Progress dots with question bookmarking (reading)
 - Listening lock: controls disabled during audio playback
 - Speaking auto-flow: audio → countdown → record with level meter → auto-stop → advance
 - Early exit confirmation when time remains
+- Keyboard navigation: A/B/C/D for MC answers, arrow keys for prev/next, Enter to advance
 
 ### Management
 
 - Admin dashboard: user table, role toggle, create/edit modals, bulk CSV import, announcements
-- Teacher dashboard: view all results, assign tests (full or section-level)
+- Teacher dashboard: view all results, assign tests (full or by section) with optional due dates
+- Assignment deadlines: teacher sets per-assignment due dates, overdue shown in red
 - Student progress tracking with completion percentages
 - Self-service password change for all users
 - Bulk user import via CSV upload
 - Announcement banner (admin posts, shown site-wide)
 - Student notes on individual questions in result review
+- Teacher comments: overall per-result + per-question feedback visible to students
+- Question explanations: from markdown `[explanation]` blocks or teacher web UI, shown after submission
+- CSV batch export: teachers select multiple students and download aggregated results
+
+### Analytics
+
+- Student dashboard: score trend line chart, section breakdown bar chart, weakest areas
+- Teachers/admins can view analytics for any student
 
 ### Export
 
@@ -182,6 +174,8 @@ python authoring/generate_tts_notebook.py tests/*.tts -o tts.ipynb  # TTS audio
 
 Place `.md` files in `tests/` with audio in matching subfolders. See `tests/example-test.md` for all 7 question types.
 
+To add explanations to questions, place an `[explanation]...[/explanation]` block immediately after a `[question]...[/question]` block in the test markdown. Explanations are shown to students after submission in the result review page. Teachers can also add or override explanations from the web UI.
+
 ---
 
 ## Project structure
@@ -204,12 +198,12 @@ Place `.md` files in `tests/` with audio in matching subfolders. See `tests/exam
 │   ├── assignments.html      Student assignments
 │   ├── test.html             Test-taking interface
 │   ├── history.html          Student history
-│   ├── result_detail.html    Per-question result breakdown
+│   ├── result_detail.html    Per-question result breakdown + explanations + teacher comments
+│   ├── dashboard.html        Analytics dashboard (charts, section breakdown)
 │   ├── admin_users.html      User management (create/edit/delete)
 │   ├── teacher_results.html  Results viewer + test assignment
 │   ├── teacher_progress.html Student progress tracking
-│   ├── account.html          Password change
-│   └── teacher_progress.html Student progress tracking
+│   └── account.html          Password change
 ├── static/
 │   ├── css/style.css         All styles (light + dark, sidebar, cards, modal)
 │   └── js/app.js             Test engine (timer, audio, recording, grading)

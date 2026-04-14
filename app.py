@@ -111,7 +111,11 @@ def login():
             session['role'] = u['role']
             session['display_name'] = u['display_name']
             if request.form.get('remember') == 'on': session.permanent = True
-            return redirect(request.args.get('next', '/'))
+            nxt = request.args.get('next', '/')
+            # Prevent open redirect — only allow relative paths
+            if not nxt.startswith('/') or nxt.startswith('//'):
+                nxt = '/'
+            return redirect(nxt)
         error = 'Invalid username or password'
     return render_template('login.html', error=error)
 
@@ -145,7 +149,9 @@ def assignments():
     u = cur_user()
     my_assignments = db.get_assignments(student_id=u['id'])
     tests = _cached_scan()
-    return render_template('assignments.html', assignments=my_assignments, tests=tests, user=u)
+    from datetime import datetime as dt
+    return render_template('assignments.html', assignments=my_assignments, tests=tests, user=u,
+        now_date=dt.utcnow().strftime('%Y-%m-%d'))
 
 @app.route('/api/tests')
 def api_tests():
@@ -167,6 +173,7 @@ def api_module(filename):
         cp = dict(p)
         if not is_practice:
             cp.pop('answer', None); cp.pop('cloze_answers', None); cp.pop('cloze_fills', None)
+        cp.pop('explanation', None)  # Explanations only available via /api/explanations in review mode
         client_pages.append(cp)
     return jsonify({
         'header': parsed['header'],
@@ -280,8 +287,12 @@ def admin_delete_user(uid):
 @require_role('admin')
 def admin_edit_user(uid):
     pw = request.form.get('password','').strip()
+    new_role = request.form.get('role')
+    # Prevent admin from changing their own role (could lock out the last admin)
+    if uid == session.get('user_id') and new_role and new_role != 'admin':
+        flash('Cannot change your own role'); return redirect('/admin/users')
     db.update_user(uid, display_name=request.form.get('display_name'),
-        password=pw or None, role=request.form.get('role'))
+        password=pw or None, role=new_role)
     flash('User updated'); return redirect('/admin/users')
 
 @app.route('/admin/users/import', methods=['POST'])
@@ -347,7 +358,8 @@ def teacher_assign():
     sid = request.form.get('student_id', type=int)
     tid = request.form.get('test_id','')
     sec = request.form.get('section','').strip() or None
-    if sid and tid: db.assign_test(cur_user()['id'], sid, tid, sec); flash('Test assigned')
+    due = request.form.get('due_date','').strip() or None
+    if sid and tid: db.assign_test(cur_user()['id'], sid, tid, sec, due); flash('Test assigned')
     return redirect('/teacher/results')
 
 @app.route('/teacher/progress')
@@ -422,20 +434,154 @@ def history_page():
 @require_login
 def api_get_notes(result_id):
     u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
     return jsonify(db.get_notes(u['id'], result_id))
 
 @app.route('/api/notes/<int:result_id>', methods=['POST'])
 @require_login
 def api_save_note(result_id):
     u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
     data = request.get_json()
     if not data: abort(400)
     db.save_note(u['id'], result_id, data.get('question_id', ''), data.get('note', ''))
     return jsonify({'ok': True})
 
+# ===== Dashboard Analytics =====
+
+@app.route('/dashboard')
+@require_login
+def dashboard():
+    u = cur_user()
+    if u['role'] == 'student':
+        return render_template('dashboard.html', user=u, students=None)
+    # Teachers/admins see student list
+    students = db.list_users(role='student')
+    return render_template('dashboard.html', user=u, students=students)
+
+@app.route('/api/analytics/<int:uid>')
+@require_login
+def api_analytics(uid):
+    u = cur_user()
+    # Students can only view their own; teachers/admins can view any
+    if u['role'] == 'student' and u['id'] != uid: abort(403)
+    results = db.get_analytics(uid)
+    # Build analytics data
+    score_history = []
+    section_totals = {}
+    section_correct = {}
+    for r in results:
+        if r['total_questions'] > 0:
+            pct = round(r['total_correct'] / r['total_questions'] * 100)
+            score_history.append({'date': r['date'][:10], 'pct': pct, 'name': r['test_name'] or r['test_id']})
+        try:
+            sections = json.loads(r['sections_json']) if r['sections_json'] else []
+        except Exception: sections = []
+        for sec in sections:
+            s = sec.get('section', 'unknown')
+            sc = sec.get('score', {})
+            section_totals[s] = section_totals.get(s, 0) + sc.get('total', 0)
+            section_correct[s] = section_correct.get(s, 0) + sc.get('correct', 0)
+    section_breakdown = []
+    for s in ['reading', 'listening', 'writing', 'speaking']:
+        t = section_totals.get(s, 0)
+        c = section_correct.get(s, 0)
+        section_breakdown.append({'section': s, 'correct': c, 'total': t, 'pct': round(c/t*100) if t > 0 else 0})
+    return jsonify({'score_history': score_history, 'section_breakdown': section_breakdown})
+
+# ===== Teacher Comments =====
+
+@app.route('/api/comments/<int:result_id>', methods=['GET'])
+@require_login
+def api_get_comments(result_id):
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    return jsonify(db.get_teacher_comments(result_id))
+
+@app.route('/api/comments/<int:result_id>', methods=['POST'])
+@require_login
+@require_role('admin', 'teacher')
+def api_save_comment(result_id):
+    u = cur_user()
+    data = request.get_json()
+    if not data: abort(400)
+    db.save_teacher_comment(u['id'], result_id, data.get('question_id'), data.get('comment', ''))
+    return jsonify({'ok': True})
+
+# ===== Question Explanations =====
+
+@app.route('/api/explanations/<test_id>', methods=['GET'])
+@require_login
+def api_get_explanations(test_id):
+    # Merge: markdown-based explanations (from parsed test) + DB explanations
+    db_expl = db.get_explanations(test_id)
+    # Try to get markdown explanations from parsed test
+    tests = _cached_scan()
+    md_expl = {}
+    if test_id in tests:
+        t = tests[test_id]
+        fp = safe_path(TESTS_DIR, t['modules'][0]['filename']) if t['modules'] else None
+        if fp and os.path.exists(fp):
+            parsed = _cached_parse(fp)
+            for mod in parsed['modules']:
+                pages = build_question_list(mod)
+                for pg in pages:
+                    qid = str(pg.get('question_id', ''))
+                    if pg.get('explanation'):
+                        md_expl[qid] = md_html(pg['explanation'])
+    # DB explanations override markdown
+    merged = {**md_expl}
+    for qid, expl in db_expl.items():
+        merged[qid] = expl
+    return jsonify(merged)
+
+@app.route('/api/explanations/<test_id>', methods=['POST'])
+@require_login
+@require_role('admin', 'teacher')
+def api_save_explanation(test_id):
+    u = cur_user()
+    data = request.get_json()
+    if not data: abort(400)
+    db.save_explanation(test_id, data.get('question_id', ''), data.get('explanation', ''), u['id'])
+    return jsonify({'ok': True})
+
+# ===== Batch Export =====
+
+@app.route('/teacher/export', methods=['POST'])
+@require_login
+@require_role('admin', 'teacher')
+def teacher_batch_export():
+    import csv as csv_mod, io
+    student_ids = request.form.getlist('student_ids', type=int)
+    fmt = request.form.get('format', 'csv')
+    if not student_ids: flash('No students selected'); return redirect('/teacher/results')
+    all_results = []
+    for sid in student_ids:
+        results = db.get_results(user_id=sid)
+        all_results.extend(results)
+    if fmt == 'csv':
+        buf = io.StringIO()
+        writer = csv_mod.writer(buf)
+        writer.writerow(['Student', 'Username', 'Test', 'Score', 'Total', 'Percent', 'Practice', 'Date'])
+        for r in all_results:
+            pct = round(r['total_correct']/r['total_questions']*100) if r['total_questions']>0 else ''
+            writer.writerow([r.get('display_name',''), r.get('username',''), r.get('test_name',''),
+                r['total_correct'], r['total_questions'], pct,
+                'Yes' if r['practice'] else 'No', r['date'][:10]])
+        output = io.BytesIO(buf.getvalue().encode('utf-8-sig'))
+        return send_file(output, mimetype='text/csv', download_name='results_export.csv', as_attachment=True)
+    flash('Unsupported format'); return redirect('/teacher/results')
+
 # ===== PDF =====
 
 @app.route('/api/export-pdf', methods=['POST'])
+@require_login
 def export_pdf():
     import io
     from reportlab.lib.pagesizes import A4
@@ -446,13 +592,13 @@ def export_pdf():
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     try: pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light')); cjk = 'STSong-Light'
-    except: cjk = 'Helvetica'
+    except Exception: cjk = 'Helvetica'
     data = request.get_json()
     if not data: abort(400)
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=20*mm, bottomMargin=20*mm)
     ts = ParagraphStyle(name='T2', fontName='Helvetica-Bold', fontSize=18, leading=22, spaceAfter=4)
-    ss = ParagraphStyle(name='Sub', fontName='Helvetica', fontSize=10, textColor=HexColor('#666'), spaceAfter=12)
+    ss = ParagraphStyle(name='Sub', fontName='Helvetica', fontSize=10, textColor=HexColor('#8e8e93'), spaceAfter=12)
     sec_s = ParagraphStyle(name='Sec', fontName='Helvetica-Bold', fontSize=13, leading=16, spaceBefore=16, spaceAfter=8)
     bf = cjk if data.get('lang')=='zh' else 'Helvetica'
     story = []
@@ -460,11 +606,11 @@ def export_pdf():
     parts = [(data.get('date','') or '')[:10]]
     if data.get('student_name'): parts.append(data['student_name'])
     if data.get('student_id'): parts.append('ID: '+data['student_id'])
-    if data.get('practice'): parts.append('<font color="#c08a1e"><b>PRACTICE</b></font>')
+    if data.get('practice'): parts.append('<font color="#ff9500"><b>PRACTICE</b></font>')
     story.append(Paragraph(' &bull; '.join(parts), ss))
-    story.append(HRFlowable(width='100%', thickness=0.5, color=HexColor('#d8dbe4')))
+    story.append(HRFlowable(width='100%', thickness=0.5, color=HexColor('#c6c6c8')))
     story.append(Spacer(1, 6*mm))
-    gn, rd, mu = HexColor('#1a9f5c'), HexColor('#d94452'), HexColor('#666')
+    gn, rd, mu = HexColor('#34c759'), HexColor('#ff3b30'), HexColor('#8e8e93')
     for r in data.get('results',[]):
         sc = r.get('score',{}); c_ = sc.get('correct',0); t_ = sc.get('total',0)
         stxt = f"{r.get('section','').capitalize()} — Module {r.get('moduleNum',1)}"
@@ -482,7 +628,7 @@ def export_pdf():
         if len(rows)>1:
             tbl = Table(rows, colWidths=[30,18,170,170,40], repeatRows=1)
             sty = [('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),9),('FONTNAME',(0,1),(-1,-1),bf),
-                ('TEXTCOLOR',(0,0),(-1,0),mu),('LINEBELOW',(0,0),(-1,0),0.5,HexColor('#d8dbe4')),
+                ('TEXTCOLOR',(0,0),(-1,0),mu),('LINEBELOW',(0,0),(-1,0),0.5,HexColor('#c6c6c8')),
                 ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),('VALIGN',(0,0),(-1,-1),'TOP')]
             for i,d in enumerate(r.get('details',[]),1):
                 if d.get('correct') is True: sty.append(('TEXTCOLOR',(1,i),(1,i),gn))

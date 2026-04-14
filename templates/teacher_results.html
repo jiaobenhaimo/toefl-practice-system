@@ -17,26 +17,42 @@
         <div class="card" style="margin-bottom:16px">
             <h3 class="card__title">Assign Test</h3>
             <form method="POST" action="/teacher/assign" class="form-row" style="align-items:center">
-                <select name="student_id" required class="login-input" style="flex:1;padding:12px 24px;font-size:1rem">
+                <select name="student_id" required class="login-input" style="flex:1">
                     <option value="">Student...</option>
                     {% for s in students %}
                     <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
                     {% endfor %}
                 </select>
-                <select name="test_id" required class="login-input" style="flex:1;padding:12px 24px;font-size:1rem">
+                <select name="test_id" required class="login-input" style="flex:1">
                     <option value="">Test...</option>
                     {% for tid, t in tests.items() %}
                     <option value="{{ tid }}">{{ t.test_name }}</option>
                     {% endfor %}
                 </select>
-                <select name="section" class="login-input" style="flex:0.6;padding:12px 24px;font-size:1rem">
+                <select name="section" class="login-input" style="flex:0.5">
                     <option value="">Full test</option>
                     <option value="reading">Reading</option>
                     <option value="listening">Listening</option>
                     <option value="writing">Writing</option>
                     <option value="speaking">Speaking</option>
                 </select>
+                <input type="date" name="due_date" class="login-input" style="flex:0.5" title="Due date (optional)">
                 <button type="submit" class="btn btn--primary">Assign</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if students %}
+        <div class="card" style="margin-bottom:16px">
+            <h3 class="card__title">Batch Export</h3>
+            <form method="POST" action="/teacher/export" class="form-row" style="align-items:center">
+                <select name="student_ids" multiple required class="login-input" style="flex:1;height:auto;min-height:44px;padding:8px 14px" title="Hold Ctrl/Cmd to select multiple">
+                    {% for s in students %}
+                    <option value="{{ s.id }}">{{ s.display_name }}</option>
+                    {% endfor %}
+                </select>
+                <input type="hidden" name="format" value="csv">
+                <button type="submit" class="btn btn--secondary">Export CSV</button>
             </form>
         </div>
         {% endif %}
@@ -55,7 +71,7 @@
                 </thead>
                 <tbody>
                     {% for r in results %}
-                    <tr onclick="location.href='/results/{{ r.id }}'" style="cursor:pointer">
+                    <tr class="result-row--clickable" onclick="location.href='/results/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/results/{{ r.id }}'">
                         <td>
                             <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
                             {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
