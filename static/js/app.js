@@ -709,9 +709,9 @@ function capitalize(str) {
 }
 
 function renderMC(body, page) {
-    const hasReadingPassage = page.section === 'reading' && page.passage_html;
+    const hasPassage = !!page.passage_html;
 
-    if (hasReadingPassage) {
+    if (hasPassage) {
         // Split-pane: passage left, question right
         body.classList.add('test-body--splitpane');
         const pane = el('div', 'split-pane');
@@ -720,6 +720,12 @@ function renderMC(body, page) {
         const passageEl = el('div', 'passage-panel passage-panel--full');
         passageEl.innerHTML = page.passage_html;
         left.appendChild(passageEl);
+        if (page.audio) {
+            const isListening = page.section === 'listening';
+            left.appendChild(createAudioPlayer(page.audio, {
+                lockNext: isListening,
+            }));
+        }
         pane.appendChild(left);
 
         const right = el('div', 'split-pane__right');
@@ -733,18 +739,12 @@ function renderMC(body, page) {
         right.appendChild(choicesEl);
         pane.appendChild(right);
 
-        // Replace the group-label already added by renderQuestion
         const existingLabel = body.querySelector('.group-label');
         if (existingLabel) existingLabel.remove();
 
         body.appendChild(pane);
     } else {
         body.classList.remove('test-body--splitpane');
-        if (page.passage_html) {
-            const p = el('div', 'passage-panel');
-            p.innerHTML = page.passage_html;
-            body.appendChild(p);
-        }
         const choicesEl = buildChoices(page);
         if (page.audio) {
             const isListening = page.section === 'listening';
@@ -867,120 +867,189 @@ function renderCloze(body, page) {
 
 function renderBuildSentence(body, page) {
     const details = page.details || {};
-    if (details.context) {
-        body.appendChild(el('div', 'bs-context', '<strong>Context:</strong> ' + escapeHtml(details.context)));
-    }
-    body.appendChild(el('div', 'bs-instruction', 'Tap words in order to build the sentence. Tap a placed word to remove it.'));
+    const hasContext = !!(details.context_html || details.context);
 
-    const slotsArea = el('div', 'sentence-slots'); slotsArea.id = 'sentence-slots';
-    slotsArea.setAttribute('data-empty', 'true');
+    // Build the right-side content (slots + word bank)
+    function buildRightContent(container) {
+        container.appendChild(el('div', 'bs-instruction', 'Tap words in order to build the sentence. Tap a placed word to remove it.'));
 
-    // Punctuation at the end (?, !, or .)
-    const lastChar = (page.answer || '').trim().slice(-1);
-    const punct = /[?!.]/.test(lastChar) ? lastChar : '.';
-    const punctEl = el('span', 'sentence-punct', punct);
-    punctEl.id = 'sentence-punct';
-    slotsArea.appendChild(punctEl);
+        const slotsArea = el('div', 'sentence-slots'); slotsArea.id = 'sentence-slots';
+        slotsArea.setAttribute('data-empty', 'true');
+        const lastChar = (page.answer || '').trim().slice(-1);
+        const punct = /[?!.]/.test(lastChar) ? lastChar : '.';
+        const punctEl = el('span', 'sentence-punct', punct);
+        punctEl.id = 'sentence-punct';
+        slotsArea.appendChild(punctEl);
+        container.appendChild(slotsArea);
 
-    body.appendChild(slotsArea);
+        function updateCapitalization() {
+            const placed = slotsArea.querySelectorAll('.word-chip--placed');
+            slotsArea.setAttribute('data-empty', placed.length === 0 ? 'true' : 'false');
+            placed.forEach((chip, i) => {
+                const orig = chip.getAttribute('data-word');
+                chip.textContent = i === 0 ? capitalize(orig) : orig;
+            });
+        }
 
-    // Capitalize first placed chip, lowercase the rest
-    function updateCapitalization() {
-        const placed = slotsArea.querySelectorAll('.word-chip--placed');
-        const isEmpty = placed.length === 0;
-        slotsArea.setAttribute('data-empty', isEmpty ? 'true' : 'false');
-        placed.forEach((chip, i) => {
-            const orig = chip.getAttribute('data-word');
-            if (i === 0) {
-                chip.textContent = capitalize(orig);
-            } else {
-                chip.textContent = orig;
-            }
-        });
-    }
-
-    const bank = el('div', 'word-bank'); bank.id = 'word-bank';
-    const words = details.words ? [...details.words] : [];
-    words.sort(() => Math.random() - 0.5);
-    words.forEach(word => {
-        const lowerWord = word.toLowerCase();
-        const chip = el('button', 'word-chip word-chip--bank', escapeHtml(lowerWord));
-        chip.setAttribute('data-word', lowerWord);
-        chip.addEventListener('click', () => {
-            chip.classList.add('word-chip--used'); chip.disabled = true;
-            const placed = el('button', 'word-chip word-chip--placed', escapeHtml(lowerWord));
-            placed.setAttribute('data-word', lowerWord);
-            placed.addEventListener('click', () => {
-                slotsArea.removeChild(placed);
-                chip.classList.remove('word-chip--used'); chip.disabled = false;
+        const bank = el('div', 'word-bank'); bank.id = 'word-bank';
+        const words = details.words ? [...details.words] : [];
+        words.sort(() => Math.random() - 0.5);
+        words.forEach(word => {
+            const lowerWord = word.toLowerCase();
+            const chip = el('button', 'word-chip word-chip--bank', escapeHtml(lowerWord));
+            chip.setAttribute('data-word', lowerWord);
+            chip.addEventListener('click', () => {
+                chip.classList.add('word-chip--used'); chip.disabled = true;
+                const placed = el('button', 'word-chip word-chip--placed', escapeHtml(lowerWord));
+                placed.setAttribute('data-word', lowerWord);
+                placed.addEventListener('click', () => {
+                    slotsArea.removeChild(placed);
+                    chip.classList.remove('word-chip--used'); chip.disabled = false;
+                    updateCapitalization();
+                });
+                slotsArea.insertBefore(placed, punctEl);
                 updateCapitalization();
             });
-            // Insert before the punctuation element so punct stays at the end
-            slotsArea.insertBefore(placed, punctEl);
-            updateCapitalization();
+            bank.appendChild(chip);
         });
-        bank.appendChild(chip);
-    });
-    body.appendChild(bank);
+        container.appendChild(bank);
 
-    // Restore saved answer
-    const saved = answers[page.question_id];
-    if (saved) {
-        let remaining = saved.replace(/[?!.]$/, '').trim().toLowerCase();
-        const availableChips = Array.from(bank.querySelectorAll('.word-chip--bank'));
-        while (remaining.length > 0) {
-            let matched = false;
-            const unused = availableChips.filter(b => !b.classList.contains('word-chip--used'));
-            unused.sort((a, b) => b.textContent.trim().length - a.textContent.trim().length);
-            for (const btn of unused) {
-                const chipText = btn.getAttribute('data-word');
-                if (remaining.startsWith(chipText)) {
-                    btn.click();
-                    remaining = remaining.slice(chipText.length).trimStart();
-                    matched = true;
-                    break;
+        // Restore saved answer
+        const saved = answers[page.question_id];
+        if (saved) {
+            let remaining = saved.replace(/[?!.]$/, '').trim().toLowerCase();
+            const availableChips = Array.from(bank.querySelectorAll('.word-chip--bank'));
+            while (remaining.length > 0) {
+                let matched = false;
+                const unused = availableChips.filter(b => !b.classList.contains('word-chip--used'));
+                unused.sort((a, b) => b.textContent.trim().length - a.textContent.trim().length);
+                for (const btn of unused) {
+                    const chipText = btn.getAttribute('data-word');
+                    if (remaining.startsWith(chipText)) {
+                        btn.click();
+                        remaining = remaining.slice(chipText.length).trimStart();
+                        matched = true;
+                        break;
+                    }
                 }
+                if (!matched) break;
             }
-            if (!matched) break;
         }
+    }
+
+    if (hasContext) {
+        body.classList.add('test-body--splitpane');
+        const pane = el('div', 'split-pane');
+        const left = el('div', 'split-pane__left');
+        const contextEl = el('div', 'passage-panel passage-panel--full');
+        if (details.context_html) contextEl.innerHTML = details.context_html;
+        else contextEl.innerHTML = '<strong>Context:</strong> ' + escapeHtml(details.context);
+        left.appendChild(contextEl);
+        pane.appendChild(left);
+
+        const right = el('div', 'split-pane__right');
+        right.appendChild(el('div', 'group-label', page.group_title));
+        buildRightContent(right);
+        pane.appendChild(right);
+
+        const existingLabel = body.querySelector('.group-label');
+        if (existingLabel) existingLabel.remove();
+        body.appendChild(pane);
+    } else {
+        buildRightContent(body);
     }
 }
 
 function renderFreeWrite(body, page) {
-    if (page.content_html) {
-        const c = el('div', 'write-prompt');
-        c.innerHTML = page.content_html;
-        body.appendChild(c);
-    }
-    if (page.time_minutes) {
-        body.appendChild(el('div', 'write-time-hint', t('suggestedTime').replace('{n}', page.time_minutes)));
-    }
+    const hasContent = !!page.content_html;
     const ta = document.createElement('textarea');
     ta.id = 'free-write-area'; ta.className = 'free-write-area';
     ta.placeholder = t('typeResponse'); ta.rows = 14;
     ta.value = answers[page.question_id] || '';
-    body.appendChild(ta);
     const wc = el('div', 'word-count', '0 ' + t('words'));
-    body.appendChild(wc);
     ta.addEventListener('input', () => {
         const count = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
         wc.textContent = count + ' ' + t('words');
     });
+
+    if (hasContent) {
+        // Split-pane: prompt left, writing area right
+        body.classList.add('test-body--splitpane');
+        const pane = el('div', 'split-pane');
+        const left = el('div', 'split-pane__left');
+        const prompt = el('div', 'passage-panel passage-panel--full');
+        prompt.innerHTML = page.content_html;
+        left.appendChild(prompt);
+        pane.appendChild(left);
+
+        const right = el('div', 'split-pane__right');
+        right.appendChild(el('div', 'group-label', page.group_title));
+        if (page.time_minutes) {
+            right.appendChild(el('div', 'write-time-hint', t('suggestedTime').replace('{n}', page.time_minutes)));
+        }
+        right.appendChild(ta);
+        right.appendChild(wc);
+        pane.appendChild(right);
+
+        const existingLabel = body.querySelector('.group-label');
+        if (existingLabel) existingLabel.remove();
+        body.appendChild(pane);
+    } else {
+        if (page.time_minutes) {
+            body.appendChild(el('div', 'write-time-hint', t('suggestedTime').replace('{n}', page.time_minutes)));
+        }
+        body.appendChild(ta);
+        body.appendChild(wc);
+    }
     ta.dispatchEvent(new Event('input'));
 }
 
 function renderSpeaking(body, page) {
-    body.appendChild(el('div', 'speak-instruction', page.content || t('listenRespond')));
+    const hasContent = !!(page.content_html || (page.content && page.content !== t('listenRespond')));
 
-    const statusArea = el('div', 'speak-status'); statusArea.id = 'speak-status';
-    const meterWrap = el('div', 'level-meter');
-    meterWrap.style.display = 'none';
-    meterWrap.setAttribute('aria-label', 'Microphone input level');
-    const meterFill = el('div', 'level-meter__fill');
-    meterWrap.appendChild(meterFill);
-    const timerWrap = el('div', 'q-timer-wrap');
-    timerWrap.innerHTML = '<div class="q-timer-track"><div class="q-timer-bar" id="q-timer-bar"></div></div>' +
-        '<span class="q-timer-label" id="q-timer-label">--</span>';
+    // Build recording controls
+    function buildControls(container) {
+        container.appendChild(el('div', 'speak-instruction', page.content && !hasContent ? page.content : t('listenRespond')));
+        const statusArea = el('div', 'speak-status'); statusArea.id = 'speak-status';
+        const meterWrap = el('div', 'level-meter');
+        meterWrap.style.display = 'none';
+        meterWrap.setAttribute('aria-label', 'Microphone input level');
+        const meterFill = el('div', 'level-meter__fill');
+        meterWrap.appendChild(meterFill);
+        const timerWrap = el('div', 'q-timer-wrap');
+        timerWrap.innerHTML = '<div class="q-timer-track"><div class="q-timer-bar" id="q-timer-bar"></div></div>' +
+            '<span class="q-timer-label" id="q-timer-label">--</span>';
+        container.appendChild(statusArea);
+        container.appendChild(meterWrap);
+        container.appendChild(timerWrap);
+        return { statusArea, meterWrap, meterFill };
+    }
+
+    let statusArea, meterWrap, meterFill;
+
+    if (hasContent) {
+        body.classList.add('test-body--splitpane');
+        const pane = el('div', 'split-pane');
+        const left = el('div', 'split-pane__left');
+        const promptEl = el('div', 'passage-panel passage-panel--full');
+        if (page.content_html) promptEl.innerHTML = page.content_html;
+        else promptEl.innerHTML = escapeHtml(page.content);
+        left.appendChild(promptEl);
+        pane.appendChild(left);
+
+        const right = el('div', 'split-pane__right');
+        right.appendChild(el('div', 'group-label', page.group_title));
+        const ctrl = buildControls(right);
+        statusArea = ctrl.statusArea; meterWrap = ctrl.meterWrap; meterFill = ctrl.meterFill;
+        pane.appendChild(right);
+
+        const existingLabel = body.querySelector('.group-label');
+        if (existingLabel) existingLabel.remove();
+        body.appendChild(pane);
+    } else {
+        const ctrl = buildControls(body);
+        statusArea = ctrl.statusArea; meterWrap = ctrl.meterWrap; meterFill = ctrl.meterFill;
+    }
 
     let meterAnimId = null;
     let analyser = null;
@@ -1096,16 +1165,23 @@ function renderSpeaking(body, page) {
     }
 
     if (page.audio) {
-        body.appendChild(createAudioPlayer(page.audio, {
+        const audioPlayer = createAudioPlayer(page.audio, {
             onEnded: () => startAutoRecord(),
-        }));
+        });
+        if (hasContent) {
+            // In split-pane, put audio at top of right panel (before status area)
+            const right = body.querySelector('.split-pane__right');
+            if (right && statusArea.parentNode === right) {
+                right.insertBefore(audioPlayer, statusArea);
+            } else {
+                body.insertBefore(audioPlayer, body.firstChild);
+            }
+        } else {
+            body.insertBefore(audioPlayer, statusArea);
+        }
     } else {
         startAutoRecord();
     }
-
-    body.appendChild(statusArea);
-    body.appendChild(meterWrap);
-    body.appendChild(timerWrap);
 }
 
 function sleep(ms) {
@@ -1331,8 +1407,6 @@ async function finishCurrentModule() {
     }
     // Attach recordings for zip download
     result.recordings = { ...recordings };
-    result.hasDownloadable = Object.keys(recordings).length > 0 ||
-        currentModule.pages.some(p => ['email','discussion'].includes(p.question_type));
     result.answers = { ...answers };
     allResults.push(result);
 
@@ -1398,69 +1472,6 @@ async function finishCurrentModule() {
     }
 }
 
-/* ======= GRADING ======= */
-function gradeModule(mod, ans, recs, times) {
-    const section = mod.section;
-    const pages = mod.pages;
-    let correct = 0, total = 0;
-    const details = [];
-    let hasDownloadable = false;
-    const qTimes = times || {};
-
-    pages.forEach(page => {
-        const qid = page.question_id;
-        const userAns = ans[qid];
-        const timeSpent = qTimes[qid] || 0;
-
-        if (page.question_type === 'mc') {
-            total++;
-            const ok = userAns === page.answer;
-            if (ok) correct++;
-            details.push({ qid, type: 'mc', correct: ok, user: userAns || '—', expected: page.answer, time: timeSpent });
-        } else if (page.question_type === 'cloze') {
-            const fills = page.cloze_fills || page.cloze_answers || [];
-            const fullWords = page.cloze_answers || [];
-            const ua = userAns || [];
-            fills.forEach((expected_fill, i) => {
-                total++;
-                const uv = (ua[i] || '').trim();
-                const ok = uv.toLowerCase() === expected_fill.toLowerCase();
-                if (ok) correct++;
-                details.push({
-                    qid: qid + '.' + (i + 1), type: 'cloze', correct: ok,
-                    user: uv || '—',
-                    expected: expected_fill,
-                    fullWord: fullWords[i] || expected_fill,
-                    time: i === 0 ? timeSpent : 0,
-                });
-            });
-        } else if (page.question_type === 'build_sentence') {
-            total++;
-            const exp = (page.answer || '').trim().toLowerCase().replace(/[?!.]/g, '');
-            const usr = (userAns || '').trim().toLowerCase().replace(/[?!.]/g, '');
-            const ok = usr === exp;
-            if (ok) correct++;
-            details.push({ qid, type: 'build_sentence', correct: ok, user: userAns || '—', expected: page.answer, time: timeSpent });
-        } else if (page.question_type === 'email' || page.question_type === 'discussion') {
-            hasDownloadable = true;
-            const wc = (userAns || '').trim().split(/\s+/).filter(Boolean).length;
-            details.push({ qid, type: page.question_type, user: userAns, wordCount: wc, time: timeSpent });
-        } else if (page.question_type === 'listen_repeat' || page.question_type === 'interview') {
-            hasDownloadable = true;
-            details.push({ qid, type: page.question_type, hasRecording: !!recs[qid], time: timeSpent });
-        }
-    });
-
-    return {
-        section, moduleNum: mod.moduleNum,
-        score: { correct, total },
-        details,
-        hasDownloadable,
-        answers: { ...ans },
-        recordings: { ...recs },
-    };
-}
-
 /* ======= FINAL RESULTS SCREEN ======= */
 async function showFinalResults() {
     showScreen('screen-results');
@@ -1472,7 +1483,6 @@ async function showFinalResults() {
 
     let html = '';
     let totalCorrect = 0, totalQuestions = 0;
-    let anyDownloadable = false;
 
     allResults.forEach(result => {
         const secLabel = capitalize(result.section);
@@ -1530,7 +1540,6 @@ async function showFinalResults() {
         });
         html += '</div></div>';
 
-        if (result.hasDownloadable) anyDownloadable = true;
     });
 
     // Overall score bar for full test
@@ -1556,17 +1565,6 @@ async function showFinalResults() {
     const backBtn = el('a', 'btn btn--primary', t('backToCatalog'));
     backBtn.href = '/';
     actionsEl.appendChild(backBtn);
-
-    if (anyDownloadable) {
-        const dlBtn = el('button', 'btn btn--secondary', t('downloadZip'));
-        dlBtn.addEventListener('click', downloadFullZip);
-        actionsEl.appendChild(dlBtn);
-    }
-
-    // PDF export button
-    const pdfBtn = el('button', 'btn btn--secondary', t('exportPdf'));
-    pdfBtn.addEventListener('click', exportPdf);
-    actionsEl.appendChild(pdfBtn);
 
     // Save results to server (for logged-in users)
     try {
@@ -1620,95 +1618,6 @@ async function showFinalResults() {
             }
         }
     } catch (e) {}
-}
-
-/* ======= ZIP DOWNLOAD ======= */
-async function downloadFullZip() {
-    const zip = new JSZip();
-    const testFolder = zip.folder(TEST_INFO.test_id + '_answers');
-
-    allResults.forEach(result => {
-        const folderName = result.section + '_M' + result.moduleNum;
-        const folder = testFolder.folder(folderName);
-
-        // Text answers
-        let txt = 'Test: ' + TEST_INFO.test_name + '\n';
-        
-        
-        if (isPracticeMode) txt += 'Mode: PRACTICE\n';
-
-        txt += 'Section: ' + result.section + '\nModule: ' + result.moduleNum + '\n';
-        txt += 'Date: ' + new Date().toISOString() + '\n';
-        if (result.score.total > 0) {
-            txt += 'Score: ' + result.score.correct + '/' + result.score.total + '\n';
-        }
-        txt += '\n';
-
-        result.details.forEach(d => {
-            txt += '--- Question ' + d.qid + ' (' + d.type + ')';
-            if (d.time) txt += ' [' + d.time + 's]';
-            txt += ' ---\n';
-            if (d.type === 'email' || d.type === 'discussion') {
-                txt += (d.user || '[no answer]') + '\n';
-            } else if (d.type === 'listen_repeat' || d.type === 'interview') {
-                txt += d.hasRecording ? '[see audio file]\n' : '[no recording]\n';
-            } else {
-                txt += 'Answer: ' + String(d.user) + '\n';
-                if (d.correct !== undefined) txt += (d.correct ? 'CORRECT' : 'WRONG — expected: ' + d.expected) + '\n';
-            }
-            txt += '\n';
-        });
-        folder.file('answers.txt', txt);
-
-        // Audio recordings
-        if (result.recordings) {
-            for (const [qid, blob] of Object.entries(result.recordings)) {
-                if (blob instanceof Blob) {
-                    folder.file('q' + qid + '_recording.' + recordingExt, blob);
-                }
-            }
-        }
-    });
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    const prefix = isPracticeMode ? 'practice_' : '';
-    saveAs(content, prefix + TEST_INFO.test_id + '_answers.zip');
-}
-
-async function exportPdf() {
-    const data = {
-        test_name: TEST_INFO.test_name,
-        test_id: TEST_INFO.test_id,
-        practice: isPracticeMode,
-        lang: window._lang || 'en',
-        date: new Date().toISOString(),
-        results: allResults.map(r => ({
-            section: r.section, moduleNum: r.moduleNum,
-            score: r.score,
-            details: r.details.map(d => ({
-                qid: d.qid, type: d.type, correct: d.correct,
-                user: String(d.user || ''), expected: d.expected || '',
-                fullWord: d.fullWord || '', wordCount: d.wordCount,
-                hasRecording: d.hasRecording, time: d.time || 0,
-            })),
-        })),
-    };
-    try {
-        const resp = await fetch('/api/export-pdf', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        if (resp.ok) {
-            const blob = await resp.blob();
-            const prefix = isPracticeMode ? 'practice_' : '';
-            saveAs(blob, prefix + TEST_INFO.test_id + '_results.pdf');
-        } else {
-            alert('PDF export failed: ' + resp.status);
-        }
-    } catch (e) {
-        alert('PDF export failed: ' + e.message);
-    }
 }
 
 /* ======= KEYBOARD SHORTCUTS ======= */

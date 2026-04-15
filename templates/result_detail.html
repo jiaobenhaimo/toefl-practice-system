@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Result — {{ site.name }}{% endblock %}
+{% block title %}Result Detail — {{ site.name }}{% endblock %}
 
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main" style="max-width:860px">
         {% if user.role in ('admin', 'teacher') %}
-        <a href="{{ url_for('teacher_results') }}" class="back-link">&larr; Back to Results</a>
+        <a href="{{ url_for('teacher_results') }}" class="back-link">&larr; Back to Submissions</a>
         {% else %}
-        <a href="{{ url_for('history_page') }}" class="back-link">&larr; Back to History</a>
+        <a href="{{ url_for('history_page') }}" class="back-link">&larr; Back to Result History</a>
         {% endif %}
         <h2 class="page-heading">
             {{ result.test_name or result.test_id }}

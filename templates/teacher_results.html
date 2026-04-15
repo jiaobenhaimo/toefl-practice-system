@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Results — {{ site.name }}{% endblock %}
+{% block title %}Submissions — {{ site.name }}{% endblock %}
 
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">Student Results</h2>
+        <h2 class="page-heading">Submissions</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -45,7 +45,7 @@
 
         {% if students %}
         <div class="card" style="margin-bottom:16px">
-            <h3 class="card__title">Batch Export</h3>
+            <h3 class="card__title">Export Results</h3>
             <form method="POST" action="/teacher/export" class="form-row" style="align-items:center">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <select name="student_ids" multiple required class="login-input" style="flex:1;height:auto;min-height:44px;padding:8px 14px" title="Hold Ctrl/Cmd to select multiple">
@@ -60,7 +60,7 @@
         {% endif %}
 
         <div class="card">
-            <h3 class="card__title">Recent Results</h3>
+            <h3 class="card__title">All Submissions</h3>
             {% if results %}
             <table class="user-table">
                 <thead>
@@ -69,20 +69,26 @@
                         <th>Test</th>
                         <th style="width:100px">Score</th>
                         <th style="width:130px">Date</th>
+                        <th style="width:44px"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for r in results %}
-                    <tr class="result-row--clickable" onclick="location.href='/results/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/results/{{ r.id }}'">
+                    <tr class="result-row--clickable" onclick="location.href='/review/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/review/{{ r.id }}'">
                         <td>
                             <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
-                            {% if r.practice %}<span class="practice-badge">PRACTICE</span>{% endif %}
+                            {% if r.practice %}<span class="practice-badge">Practice</span>{% endif %}
                         </td>
                         <td>{{ r.test_name or r.test_id }}</td>
                         <td>
                             {% if r.total_questions > 0 %}{{ r.total_correct }}/{{ r.total_questions }}{% endif %}
                         </td>
                         <td style="color:var(--text-dim)">{{ r.date|fmtdate }}</td>
+                        <td class="user-table__actions" onclick="event.stopPropagation()">
+                            <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF">
+                                <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+                            </a>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

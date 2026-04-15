@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Users — {{ site.name }}{% endblock %}
+{% block title %}User Management — {{ site.name }}{% endblock %}
 
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">Manage Users</h2>
+        <h2 class="page-heading">User Management</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}

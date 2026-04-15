@@ -123,6 +123,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .practice-toggle:has(input:checked) { background: var(--amber); color: #000; border-color: var(--amber); font-weight: 600; }
 .practice-toggle input { display: none; }
 .practice-badge { display: inline-block; font-size: 0.71rem; font-weight: 700; color: #000; background: var(--amber); padding: 2px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; }
+.assigned-badge { display: inline-block; font-size: 0.71rem; font-weight: 700; color: #fff; background: var(--accent); padding: 2px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* Language toggle */
 .lang-toggle { background: none; border: 1px solid var(--border); cursor: pointer; color: var(--text-muted); padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.82rem; font-weight: 600; min-height: 44px; transition: all 0.2s; font-family: var(--font-body); }
@@ -552,6 +553,24 @@ select.login-input { padding-right: 32px; background-image: url("data:image/svg+
 .review-cloze-row--correct .review-cloze-row__icon { color: var(--green); }
 .review-cloze-row--wrong .review-cloze-row__icon { color: var(--red); }
 .review-cloze-row--wrong .review-cloze-row__user { color: var(--red); }
+
+/* Review summary bar */
+.review-summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border); align-items: center; }
+.review-summary__item { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 16px; background: var(--bg-input); font-size: 0.82rem; transition: background 0.15s; }
+.review-summary__item:hover { background: var(--bg-hover); }
+.review-summary__label { font-weight: 600; }
+.review-summary__score { color: var(--text-muted); }
+.review-summary__comment { flex-basis: 100%; font-size: 0.85rem; color: var(--listening); padding: 6px 0 2px; }
+
+/* Dot separator between sections */
+.progress-dot-separator { width: 2px; height: 12px; background: var(--border); margin: 0 4px; flex-shrink: 0; align-self: center; }
+
+/* Cloze inline fill display */
+.review-cloze-inline { font-weight: 600; padding: 1px 4px; border-radius: 3px; }
+.review-cloze-inline--correct { color: var(--green); background: rgba(52,199,89,0.08); }
+.review-cloze-inline--wrong { color: var(--red); background: rgba(255,59,48,0.08); }
+.review-cloze-inline--wrong s { opacity: 0.5; }
+.review-cloze-inline--wrong s + * { color: var(--green); }
 
 /* ===== USER TABLE ===== */
 .user-table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }

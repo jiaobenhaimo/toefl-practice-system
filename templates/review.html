@@ -25,6 +25,9 @@
             </div>
         </header>
 
+        <!-- Section summary bar -->
+        <div id="rv-summary" class="review-summary"></div>
+
         <div class="progress-dots-row" id="rv-progress-row">
             <div class="progress-dots" id="rv-dots" role="group" aria-label="Question progress"></div>
             <span class="progress-counter" id="rv-counter"></span>
@@ -43,47 +46,94 @@
 <script>
 var RESULT_ID = {{ result.id }};
 var USER_ROLE = {{ user.role|tojson }};
-var _data = null;     // Full review data from API
-var _allPages = [];   // Flattened list of {page, moduleIdx, section, module}
+var _data = null;
+var _allPages = [];
 var _pageIdx = 0;
+var _sectionBreaks = []; // Indices where a new section starts
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 async function loadReview() {
     try {
         var resp = await fetch('/api/review-data/' + RESULT_ID);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
         _data = await resp.json();
     } catch (e) {
         document.getElementById('review-loading').innerHTML = '<div class="loading-msg">Failed to load review data.</div>';
         return;
     }
-    // Flatten all pages across modules
     _allPages = [];
+    _sectionBreaks = [];
+    var lastSection = '';
     _data.modules.forEach(function(mod, mi) {
-        (mod.pages || []).forEach(function(pg) {
+        (mod.pages || []).forEach(function(pg, pi) {
+            var key = mod.section + '_' + mod.module;
+            if (key !== lastSection) {
+                _sectionBreaks.push(_allPages.length);
+                lastSection = key;
+            }
             _allPages.push({ page: pg, moduleIdx: mi, section: mod.section, module: mod.module });
         });
     });
     if (!_allPages.length) {
-        document.getElementById('review-loading').innerHTML = '<div class="loading-msg">No questions found.</div>';
+        document.getElementById('review-loading').innerHTML = '<div class="loading-msg">No questions found for this result.</div>';
         return;
     }
     document.getElementById('review-loading').classList.remove('screen--active');
     document.getElementById('review-main').classList.add('screen--active');
+    buildSummary();
     buildDots();
     renderPage();
+}
+
+function buildSummary() {
+    var el = document.getElementById('rv-summary');
+    var sums = _data.section_summaries || [];
+    if (!sums.length) { el.style.display = 'none'; return; }
+    var html = '';
+    sums.forEach(function(s) {
+        var pct = s.total > 0 ? Math.round(s.correct / s.total * 100) : 0;
+        var label = s.section.charAt(0).toUpperCase() + s.section.slice(1);
+        if (sums.length > 1) label += ' M' + s.moduleNum;
+        html += '<div class="review-summary__item" data-section="' + s.section + '" data-module="' + s.moduleNum + '" onclick="jumpToSection(\'' + s.section + '\',' + s.moduleNum + ')" style="cursor:pointer">';
+        html += '<span class="review-summary__label" style="color:var(--' + s.section + ')">' + label + '</span>';
+        html += '<span class="review-summary__score">' + s.correct + '/' + s.total;
+        if (s.total > 0) html += ' (' + pct + '%)';
+        html += '</span></div>';
+    });
+    // Show overall teacher comment if present
+    var overall = _data.comments && _data.comments._overall;
+    if (overall && overall.comment) {
+        html += '<div class="review-summary__comment"><strong>Teacher:</strong> ' + esc(overall.comment) + '</div>';
+    }
+    el.innerHTML = html;
+}
+
+function jumpToSection(section, moduleNum) {
+    for (var i = 0; i < _allPages.length; i++) {
+        if (_allPages[i].section === section && _allPages[i].module === moduleNum) {
+            _pageIdx = i; renderPage(); return;
+        }
+    }
 }
 
 function buildDots() {
     var container = document.getElementById('rv-dots');
     container.innerHTML = '';
     _allPages.forEach(function(item, i) {
+        // Add section separator
+        if (_sectionBreaks.indexOf(i) !== -1 && i > 0) {
+            var sep = document.createElement('span');
+            sep.className = 'progress-dot-separator';
+            container.appendChild(sep);
+        }
         var dot = document.createElement('span');
         dot.className = 'progress-dot';
         var g = item.page.graded || {};
         if (g.correct === true) dot.classList.add('progress-dot--correct');
         else if (g.correct === false) dot.classList.add('progress-dot--wrong');
         else dot.classList.add('progress-dot--answered');
+        dot.setAttribute('data-idx', i);
         dot.onclick = function() { _pageIdx = i; renderPage(); };
         dot.style.cursor = 'pointer';
         container.appendChild(dot);
@@ -91,10 +141,11 @@ function buildDots() {
 }
 
 function updateDots() {
-    var dots = document.getElementById('rv-dots').children;
-    for (var i = 0; i < dots.length; i++) {
-        dots[i].classList.toggle('progress-dot--current', i === _pageIdx);
-    }
+    var dots = document.querySelectorAll('#rv-dots .progress-dot');
+    dots.forEach(function(dot) {
+        var idx = parseInt(dot.getAttribute('data-idx'));
+        dot.classList.toggle('progress-dot--current', idx === _pageIdx);
+    });
     document.getElementById('rv-counter').textContent = (_pageIdx + 1) + ' / ' + _allPages.length;
 }
 
@@ -109,24 +160,21 @@ function renderPage() {
     body.scrollTop = 0;
     window.scrollTo(0, 0);
 
-    // Header info
-    document.getElementById('rv-section-label').textContent = (item.section.charAt(0).toUpperCase() + item.section.slice(1)) + ' — Module ' + item.module;
+    // Header
+    document.getElementById('rv-section-label').textContent =
+        item.section.charAt(0).toUpperCase() + item.section.slice(1) + ' — Module ' + item.module;
     var scoreEl = document.getElementById('rv-score');
     if (g.correct === true) scoreEl.innerHTML = '<span style="color:var(--green)">✓ Correct</span>';
     else if (g.correct === false) scoreEl.innerHTML = '<span style="color:var(--red)">✗ Wrong</span>';
     else if (g.type === 'email' || g.type === 'discussion') scoreEl.innerHTML = '<span style="color:var(--text-muted)">' + (g.wordCount || 0) + ' words</span>';
     else if (g.type === 'listen_repeat' || g.type === 'interview') scoreEl.innerHTML = '<span style="color:var(--text-muted)">' + (g.hasRecording ? 'Recorded' : 'No recording') + '</span>';
     else scoreEl.textContent = '';
-
-    // Time spent
-    if (g.time) {
-        scoreEl.innerHTML += ' <span style="color:var(--text-dim);margin-left:8px">' + g.time + 's</span>';
-    }
+    if (g.time) scoreEl.innerHTML += ' <span style="color:var(--text-dim);margin-left:8px">' + g.time + 's</span>';
 
     // Group title
     if (pg.group_title) body.appendChild(mkEl('div', 'group-label', pg.group_title));
 
-    // Question content by type
+    // Question
     if (pg.question_type === 'mc') renderMCReview(body, pg, g);
     else if (pg.question_type === 'cloze') renderClozeReview(body, pg);
     else if (pg.question_type === 'build_sentence') renderBuildReview(body, pg, g);
@@ -141,61 +189,57 @@ function renderPage() {
         body.appendChild(box);
     }
 
-    // Teacher comment
+    // Per-question teacher comment
     var cmt = _data.comments[qid];
     if (cmt && cmt.comment) {
         var box = mkEl('div', 'review-panel review-panel--comment');
-        box.innerHTML = '<strong>Teacher</strong><div style="margin-top:6px">' + esc(cmt.comment) + '</div><div style="font-size:0.82rem;color:var(--text-dim);margin-top:4px">— ' + esc(cmt.teacher) + '</div>';
+        box.innerHTML = '<strong>Teacher</strong><div style="margin-top:6px">' + esc(cmt.comment) + '</div><div style="font-size:0.82rem;color:var(--text-dim);margin-top:4px">— ' + esc(cmt.teacher || '') + '</div>';
         body.appendChild(box);
     }
 
-    // Student note
+    // Note + teacher comment input
     var noteVal = _data.notes[qid] || '';
     var noteBox = mkEl('div', 'review-panel review-panel--note');
     noteBox.innerHTML = '<strong>My Notes</strong>';
     var ta = document.createElement('textarea');
-    ta.className = 'note-area';
-    ta.placeholder = 'Add a note…';
-    ta.rows = 3;
-    ta.value = noteVal;
-    ta.onblur = function() {
-        fetch('/api/notes/' + RESULT_ID, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({question_id: qid, note: ta.value.trim()})
-        });
-        _data.notes[qid] = ta.value.trim();
-    };
+    ta.className = 'note-area'; ta.placeholder = 'Add a note…'; ta.rows = 3; ta.value = noteVal;
+    (function(capturedQid) {
+        ta.onblur = function() {
+            fetch('/api/notes/' + RESULT_ID, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({question_id: capturedQid, note: ta.value.trim()})
+            });
+            _data.notes[capturedQid] = ta.value.trim();
+        };
+    })(qid);
     noteBox.appendChild(ta);
 
-    // Teacher comment input for teachers
     if (USER_ROLE === 'admin' || USER_ROLE === 'teacher') {
         var tcBox = mkEl('div', '');
         tcBox.innerHTML = '<strong style="display:block;margin-top:12px;font-size:0.88rem;color:var(--listening)">Add Teacher Comment</strong>';
         var tca = document.createElement('textarea');
-        tca.className = 'note-area';
-        tca.style.borderColor = 'var(--listening)';
-        tca.placeholder = 'Teacher comment…';
-        tca.rows = 2;
+        tca.className = 'note-area'; tca.style.borderColor = 'var(--listening)';
+        tca.placeholder = 'Teacher comment…'; tca.rows = 2;
         var existingCmt = _data.comments[qid];
-        tca.value = existingCmt ? existingCmt.comment : '';
-        tca.onblur = function() {
-            fetch('/api/comments/' + RESULT_ID, {
-                method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({question_id: qid, comment: tca.value.trim()})
-            });
-            if (!_data.comments[qid]) _data.comments[qid] = {};
-            _data.comments[qid].comment = tca.value.trim();
-        };
+        tca.value = existingCmt ? existingCmt.comment || '' : '';
+        (function(capturedQid) {
+            tca.onblur = function() {
+                fetch('/api/comments/' + RESULT_ID, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({question_id: capturedQid, comment: tca.value.trim()})
+                });
+                if (!_data.comments[capturedQid]) _data.comments[capturedQid] = {};
+                _data.comments[capturedQid].comment = tca.value.trim();
+            };
+        })(qid);
         tcBox.appendChild(tca);
         noteBox.appendChild(tcBox);
     }
     body.appendChild(noteBox);
 
-    // Nav buttons
+    // Nav
     document.getElementById('rv-prev').style.display = _pageIdx > 0 ? '' : 'none';
-    var nextBtn = document.getElementById('rv-next');
-    nextBtn.textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Back to Results';
-
+    document.getElementById('rv-next').textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Back to Results';
     updateDots();
 }
 
@@ -203,11 +247,8 @@ function rvNext() {
     if (_pageIdx < _allPages.length - 1) { _pageIdx++; renderPage(); }
     else { window.location.href = '/results/' + RESULT_ID; }
 }
-function rvPrev() {
-    if (_pageIdx > 0) { _pageIdx--; renderPage(); }
-}
+function rvPrev() { if (_pageIdx > 0) { _pageIdx--; renderPage(); } }
 
-// Keyboard navigation
 document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
     if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); rvNext(); }
@@ -215,37 +256,31 @@ document.addEventListener('keydown', function(e) {
 });
 
 function mkEl(tag, cls, html) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (html !== undefined) e.innerHTML = html;
-    return e;
+    var e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e;
 }
 
-/* ======= QUESTION RENDERERS (read-only) ======= */
+/* ======= RENDERERS ======= */
 
 function renderMCReview(body, pg, g) {
-    var hasPassage = pg.section === 'reading' && pg.passage_html;
+    var hasPassage = !!pg.passage_html;
     if (hasPassage) {
         body.classList.add('test-body--splitpane');
         var pane = mkEl('div', 'split-pane');
         var left = mkEl('div', 'split-pane__left');
-        var pass = mkEl('div', 'passage-panel passage-panel--full');
-        pass.innerHTML = pg.passage_html;
-        left.appendChild(pass);
+        left.appendChild(mkEl('div', 'passage-panel passage-panel--full', pg.passage_html));
+        if (pg.audio) left.appendChild(mkAudioPlayer(pg.audio));
         pane.appendChild(left);
         var right = mkEl('div', 'split-pane__right');
         if (pg.group_title) right.appendChild(mkEl('div', 'group-label', pg.group_title));
-        if (pg.prompt_html) { var p = mkEl('div', 'question-prompt'); p.innerHTML = pg.prompt_html; right.appendChild(p); }
+        if (pg.prompt_html) right.appendChild(mkEl('div', 'question-prompt', pg.prompt_html));
         right.appendChild(buildReviewChoices(pg, g));
         pane.appendChild(right);
-        // Remove the top-level group label
-        var el = body.querySelector('.group-label');
-        if (el) el.remove();
+        var existing = body.querySelector('.group-label');
+        if (existing) existing.remove();
         body.appendChild(pane);
     } else {
-        if (pg.passage_html) { var p = mkEl('div', 'passage-panel'); p.innerHTML = pg.passage_html; body.appendChild(p); }
         if (pg.audio) body.appendChild(mkAudioPlayer(pg.audio));
-        if (pg.prompt_html) { var p = mkEl('div', 'question-prompt'); p.innerHTML = pg.prompt_html; body.appendChild(p); }
+        if (pg.prompt_html) body.appendChild(mkEl('div', 'question-prompt', pg.prompt_html));
         body.appendChild(buildReviewChoices(pg, g));
     }
 }
@@ -258,7 +293,6 @@ function buildReviewChoices(pg, g) {
         var text = pg.choices[letter];
         var label = mkEl('label', 'choice');
         label.style.pointerEvents = 'none';
-        // Color coding
         if (letter === correctAns) label.classList.add('choice--correct');
         if (letter === userAns && userAns !== correctAns) label.classList.add('choice--wrong');
         if (letter === userAns) label.classList.add('choice--selected');
@@ -274,20 +308,33 @@ function buildReviewChoices(pg, g) {
 
 function renderClozeReview(body, pg) {
     if (pg.passage_html) {
-        var passEl = mkEl('div', 'passage-panel');
-        passEl.innerHTML = pg.passage_html;
-        body.appendChild(passEl);
+        var html = pg.passage_html;
+        var fills = pg.cloze_fills || [];
+        var words = pg.cloze_answers || [];
+        var cdet = pg.cloze_details || [];
+        var idx = 0;
+        html = html.replace(/(\w*)\[(\d+)\](\w*)/g, function(match, prefix, countStr, suffix) {
+            var d = cdet[idx] || {};
+            var userWord = d.user || '\u2014';
+            var correctWord = words[idx] || fills[idx] || '';
+            var isCorrect = d.correct;
+            var cls = isCorrect ? 'review-cloze-inline--correct' : 'review-cloze-inline--wrong';
+            var display = isCorrect ? esc(correctWord) : '<s>' + esc(userWord) + '</s> ' + esc(correctWord);
+            idx++;
+            return '<span class="review-cloze-inline ' + cls + '">' + display + '</span>';
+        });
+        body.appendChild(mkEl('div', 'passage-panel', html));
     }
-    var details = pg.cloze_details || [];
-    if (details.length) {
+    var clozeDetails = pg.cloze_details || [];
+    if (clozeDetails.length) {
         var table = mkEl('div', 'review-cloze-table');
-        details.forEach(function(d, i) {
+        clozeDetails.forEach(function(d, i) {
             var row = mkEl('div', 'review-cloze-row ' + (d.correct ? 'review-cloze-row--correct' : 'review-cloze-row--wrong'));
             row.innerHTML = '<span class="review-cloze-row__num">' + (i+1) + '</span>' +
-                '<span class="review-cloze-row__user">' + esc(d.user || '—') + '</span>' +
-                '<span class="review-cloze-row__arrow">→</span>' +
+                '<span class="review-cloze-row__user">' + esc(d.user || '\u2014') + '</span>' +
+                '<span class="review-cloze-row__arrow">\u2192</span>' +
                 '<span class="review-cloze-row__answer">' + esc(d.fullWord || d.expected || '') + '</span>' +
-                '<span class="review-cloze-row__icon">' + (d.correct ? '✓' : '✗') + '</span>';
+                '<span class="review-cloze-row__icon">' + (d.correct ? '\u2713' : '\u2717') + '</span>';
             table.appendChild(row);
         });
         body.appendChild(table);
@@ -295,62 +342,104 @@ function renderClozeReview(body, pg) {
 }
 
 function renderBuildReview(body, pg, g) {
-    if (pg.details && pg.details.context_html) {
-        var ctx = mkEl('div', 'passage-panel');
-        ctx.innerHTML = pg.details.context_html;
-        body.appendChild(ctx);
-    }
-    var userAns = g.user || '—';
+    var hasContext = pg.details && (pg.details.context_html || pg.details.context);
+    var userAns = g.user || '\u2014';
     var expected = g.expected || pg.answer || '';
-    var box = mkEl('div', 'review-compare');
-    box.innerHTML =
+    var compareHtml =
         '<div class="review-compare__row"><span class="review-compare__label">Your answer</span><span class="review-compare__value ' + (g.correct ? 'review-compare__value--correct' : 'review-compare__value--wrong') + '">' + esc(userAns) + '</span></div>' +
         '<div class="review-compare__row"><span class="review-compare__label">Correct</span><span class="review-compare__value review-compare__value--expected">' + esc(expected) + '</span></div>';
-    body.appendChild(box);
+    if (hasContext) {
+        body.classList.add('test-body--splitpane');
+        var pane = mkEl('div', 'split-pane');
+        var left = mkEl('div', 'split-pane__left');
+        var ctx = mkEl('div', 'passage-panel passage-panel--full');
+        ctx.innerHTML = pg.details.context_html || ('<strong>Context:</strong> ' + esc(pg.details.context));
+        left.appendChild(ctx);
+        pane.appendChild(left);
+        var right = mkEl('div', 'split-pane__right');
+        if (pg.group_title) right.appendChild(mkEl('div', 'group-label', pg.group_title));
+        right.appendChild(mkEl('div', 'review-compare', compareHtml));
+        pane.appendChild(right);
+        var existing = body.querySelector('.group-label');
+        if (existing) existing.remove();
+        body.appendChild(pane);
+    } else {
+        body.appendChild(mkEl('div', 'review-compare', compareHtml));
+    }
 }
 
 function renderWriteReview(body, pg, g) {
-    if (pg.content_html) {
-        var prompt = mkEl('div', 'passage-panel');
-        prompt.innerHTML = pg.content_html;
-        body.appendChild(prompt);
-    }
+    var hasContent = !!pg.content_html;
     var text = g.user || '';
-    if (text) {
-        var box = mkEl('div', 'writing-response');
-        box.innerHTML = '<div class="writing-response__text">' + esc(text).replace(/\n/g, '<br>') + '</div>';
-        body.appendChild(box);
+    var wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+    if (hasContent) {
+        body.classList.add('test-body--splitpane');
+        var pane = mkEl('div', 'split-pane');
+        var left = mkEl('div', 'split-pane__left');
+        left.appendChild(mkEl('div', 'passage-panel passage-panel--full', pg.content_html));
+        pane.appendChild(left);
+        var right = mkEl('div', 'split-pane__right');
+        if (pg.group_title) right.appendChild(mkEl('div', 'group-label', pg.group_title));
+        if (text) {
+            right.appendChild(mkEl('div', 'writing-response', '<div class="writing-response__text">' + esc(text).replace(/\n/g, '<br>') + '</div>'));
+            right.appendChild(mkEl('div', 'word-count', wordCount + ' words'));
+        } else {
+            right.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No response submitted</em>'));
+        }
+        pane.appendChild(right);
+        var existing = body.querySelector('.group-label');
+        if (existing) existing.remove();
+        body.appendChild(pane);
     } else {
-        body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No response submitted</em>'));
+        if (text) {
+            body.appendChild(mkEl('div', 'writing-response', '<div class="writing-response__text">' + esc(text).replace(/\n/g, '<br>') + '</div>'));
+            body.appendChild(mkEl('div', 'word-count', wordCount + ' words'));
+        } else {
+            body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No response submitted</em>'));
+        }
     }
 }
 
 function renderSpeakReview(body, pg, g) {
-    if (pg.content_html) {
-        var prompt = mkEl('div', 'passage-panel');
-        prompt.innerHTML = pg.content_html;
-        body.appendChild(prompt);
-    }
+    var hasContent = !!(pg.content_html || pg.content);
     var qid = pg.question_id || '';
-    if (_data.recordings.indexOf(qid) !== -1) {
-        var audio = document.createElement('audio');
-        audio.controls = true;
-        audio.preload = 'none';
-        audio.className = 'recording-player';
-        audio.innerHTML = '<source src="/recordings/' + RESULT_ID + '/' + encodeURIComponent(qid) + '">';
-        body.appendChild(audio);
-    } else if (g.hasRecording) {
-        body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>Recording not available on server</em>'));
+    function buildRecArea(container) {
+        if (pg.audio) container.appendChild(mkAudioPlayer(pg.audio));
+        if (_data.recordings.indexOf(qid) !== -1) {
+            container.appendChild(mkEl('div', '', '<strong style="display:block;margin:12px 0 6px;font-size:0.88rem;color:var(--text-muted)">Your Recording</strong>'));
+            var audio = document.createElement('audio');
+            audio.controls = true; audio.preload = 'none'; audio.className = 'recording-player';
+            audio.innerHTML = '<source src="/recordings/' + RESULT_ID + '/' + encodeURIComponent(qid) + '">';
+            container.appendChild(audio);
+        } else if (g.hasRecording) {
+            container.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>Recording not available on server</em>'));
+        } else {
+            container.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No recording</em>'));
+        }
+    }
+    if (hasContent) {
+        body.classList.add('test-body--splitpane');
+        var pane = mkEl('div', 'split-pane');
+        var left = mkEl('div', 'split-pane__left');
+        var prompt = mkEl('div', 'passage-panel passage-panel--full');
+        prompt.innerHTML = pg.content_html || esc(pg.content);
+        left.appendChild(prompt);
+        pane.appendChild(left);
+        var right = mkEl('div', 'split-pane__right');
+        if (pg.group_title) right.appendChild(mkEl('div', 'group-label', pg.group_title));
+        buildRecArea(right);
+        pane.appendChild(right);
+        var existing = body.querySelector('.group-label');
+        if (existing) existing.remove();
+        body.appendChild(pane);
     } else {
-        body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No recording</em>'));
+        buildRecArea(body);
     }
 }
 
 function mkAudioPlayer(src) {
     var audio = document.createElement('audio');
-    audio.controls = true;
-    audio.preload = 'auto';
-    audio.className = 'recording-player';
+    audio.controls = true; audio.preload = 'auto'; audio.className = 'recording-player';
     audio.style.marginBottom = '16px';
     audio.innerHTML = '<source src="/audio/' + esc(src) + '">';
     return audio;

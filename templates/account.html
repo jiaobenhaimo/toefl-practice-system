@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Account — {{ site.name }}{% endblock %}
+{% block title %}Account Settings — {{ site.name }}{% endblock %}
 
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main" style="max-width:520px">
-        <h2 class="page-heading">Account</h2>
+        <h2 class="page-heading">Account Settings</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}

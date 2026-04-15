@@ -229,8 +229,20 @@ def assignments():
     u = cur_user()
     my_assignments = db.get_assignments(student_id=u['id'])
     tests = _cached_scan()
+    # Filter out completed assignments (item 2)
+    my_results = db.get_results(user_id=u['id'], limit=10000)
+    completed_keys = set()
+    for r in my_results:
+        if not r['practice']:
+            completed_keys.add((r['test_id'], None))  # full test done
+            try:
+                secs = json.loads(r['sections_json']) if r['sections_json'] else []
+            except Exception: secs = []
+            for sec in secs:
+                completed_keys.add((r['test_id'], sec.get('section')))
+    pending = [a for a in my_assignments if (a['test_id'], a.get('section')) not in completed_keys]
     from datetime import datetime as dt
-    return render_template('assignments.html', assignments=my_assignments, tests=tests, user=u,
+    return render_template('assignments.html', assignments=pending, tests=tests, user=u,
         now_date=dt.utcnow().strftime('%Y-%m-%d'))
 
 @app.route('/api/tests')
@@ -852,11 +864,14 @@ def api_review_data(result_id):
     try:
         sections = json.loads(r['sections_json']) if r['sections_json'] else []
     except Exception: sections = []
+    # Build a set of (section, moduleNum) that were actually taken
+    taken_modules = set()
     detail_map = {}
     for sec in sections:
+        taken_modules.add((sec.get('section', ''), sec.get('moduleNum', 1)))
         for d in sec.get('details', []):
             detail_map[str(d.get('qid', ''))] = d
-    # Load full test modules with HTML
+    # Load ONLY modules that were actually taken (not the entire test)
     modules = []
     for mod_info in test_info['modules']:
         fp = safe_path(TESTS_DIR, mod_info['filename'])
@@ -865,6 +880,9 @@ def api_review_data(result_id):
         mi = mod_info['module_index']
         if mi >= len(parsed['modules']): continue
         mod = parsed['modules'][mi]
+        # Skip modules that weren't in the graded results
+        if (mod['section'], mod['module']) not in taken_modules:
+            continue
         pages = pages_to_html(build_question_list(mod))
         for p in pages:
             qid = str(p.get('question_id', ''))
@@ -893,8 +911,19 @@ def api_review_data(result_id):
     explanations = {**md_expl, **db_expl}
     rec_dir = os.path.join(RECORDINGS_DIR, str(result_id))
     recs = [os.path.splitext(f)[0] for f in os.listdir(rec_dir)] if os.path.isdir(rec_dir) else []
+    # Build section summaries for the overview
+    section_summaries = []
+    for sec in sections:
+        sc = sec.get('score', {})
+        section_summaries.append({
+            'section': sec.get('section', ''),
+            'moduleNum': sec.get('moduleNum', 1),
+            'correct': sc.get('correct', 0),
+            'total': sc.get('total', 0),
+        })
     return jsonify({'modules': modules, 'notes': notes, 'comments': comments,
-        'explanations': explanations, 'recordings': recs, 'result_id': result_id})
+        'explanations': explanations, 'recordings': recs, 'result_id': result_id,
+        'section_summaries': section_summaries})
 
 # ===== History =====
 
@@ -907,8 +936,11 @@ def history_page():
     total = db.count_results(user_id=u['id'])
     results = db.get_results(user_id=u['id'], limit=per_page, offset=(page-1)*per_page)
     total_pages = max(1, (total + per_page - 1) // per_page)
+    # Build set of assigned test_ids for labeling
+    my_assignments = db.get_assignments(student_id=u['id'])
+    assigned_test_ids = set(a['test_id'] for a in my_assignments)
     return render_template('history.html', results=results, user=u,
-        page=page, total_pages=total_pages)
+        page=page, total_pages=total_pages, assigned_test_ids=assigned_test_ids)
 
 # ===== Notes API =====
 
@@ -1067,44 +1099,48 @@ def teacher_batch_export():
 
 # ===== PDF =====
 
-@app.route('/api/export-pdf', methods=['POST'])
+@app.route('/api/export-pdf/<int:result_id>')
 @require_login
-def export_pdf():
+def export_pdf_by_result(result_id):
+    """Generate PDF from a saved result (server-side, no client data needed)."""
     import io
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib.colors import HexColor
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     try: pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light')); cjk = 'STSong-Light'
     except Exception: cjk = 'Helvetica'
-    data = request.get_json()
-    if not data: abort(400)
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    try:
+        sections = json.loads(r['sections_json']) if r['sections_json'] else []
+    except Exception: sections = []
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=20*mm, bottomMargin=20*mm)
     ts = ParagraphStyle(name='T2', fontName='Helvetica-Bold', fontSize=18, leading=22, spaceAfter=4)
     ss = ParagraphStyle(name='Sub', fontName='Helvetica', fontSize=10, textColor=HexColor('#8e8e93'), spaceAfter=12)
     sec_s = ParagraphStyle(name='Sec', fontName='Helvetica-Bold', fontSize=13, leading=16, spaceBefore=16, spaceAfter=8)
-    bf = cjk if data.get('lang')=='zh' else 'Helvetica'
     story = []
-    story.append(Paragraph(data.get('test_name','TOEFL Practice Test'), ts))
-    parts = [(data.get('date','') or '')[:10]]
-    if data.get('student_name'): parts.append(data['student_name'])
-    if data.get('student_id'): parts.append('ID: '+data['student_id'])
-    if data.get('practice'): parts.append('<font color="#ff9500"><b>PRACTICE</b></font>')
-    story.append(Paragraph(' &bull; '.join(parts), ss))
+    story.append(Paragraph(r['test_name'] or r['test_id'], ts))
+    parts = [filter_fmtdate(r['date'])]
+    parts.append(r.get('display_name') or r.get('username') or '')
+    if r['practice']: parts.append('<font color="#ff9500"><b>PRACTICE</b></font>')
+    story.append(Paragraph(' &bull; '.join(p for p in parts if p), ss))
     story.append(HRFlowable(width='100%', thickness=0.5, color=HexColor('#c6c6c8')))
     story.append(Spacer(1, 6*mm))
     gn, rd, mu = HexColor('#34c759'), HexColor('#ff3b30'), HexColor('#8e8e93')
-    for r in data.get('results',[]):
-        sc = r.get('score',{}); c_ = sc.get('correct',0); t_ = sc.get('total',0)
-        stxt = f"{r.get('section','').capitalize()} — Module {r.get('moduleNum',1)}"
+    for sec in sections:
+        sc = sec.get('score',{}); c_ = sc.get('correct',0); t_ = sc.get('total',0)
+        stxt = f"{sec.get('section','').capitalize()} — Module {sec.get('moduleNum',1)}"
         if t_>0: stxt += f"  ({c_}/{t_}, {round(c_/t_*100)}%)"
         story.append(Paragraph(stxt, sec_s))
         rows = [['Q','','Your Answer','Correct','Time']]
-        for d in r.get('details',[]):
+        for d in sec.get('details',[]):
             q=str(d.get('qid','')); dt=d.get('type',''); tm=str(d.get('time',0))+'s' if d.get('time') else ''
             if dt in ('mc','cloze','build_sentence'):
                 rows.append([q,'\u2713' if d.get('correct') else '\u2717',str(d.get('user',''))[:40],str(d.get('fullWord') or d.get('expected',''))[:40],tm])
@@ -1114,16 +1150,17 @@ def export_pdf():
                 rows.append([q,'\U0001F3A4' if d.get('hasRecording') else '\u2014','Recorded' if d.get('hasRecording') else 'No recording','',tm])
         if len(rows)>1:
             tbl = Table(rows, colWidths=[30,18,170,170,40], repeatRows=1)
-            sty = [('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),9),('FONTNAME',(0,1),(-1,-1),bf),
+            sty = [('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),9),
                 ('TEXTCOLOR',(0,0),(-1,0),mu),('LINEBELOW',(0,0),(-1,0),0.5,HexColor('#c6c6c8')),
                 ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),('VALIGN',(0,0),(-1,-1),'TOP')]
-            for i,d in enumerate(r.get('details',[]),1):
+            for i,d in enumerate(sec.get('details',[]),1):
                 if d.get('correct') is True: sty.append(('TEXTCOLOR',(1,i),(1,i),gn))
                 elif d.get('correct') is False: sty.append(('TEXTCOLOR',(1,i),(1,i),rd))
             tbl.setStyle(TableStyle(sty)); story.append(tbl)
         story.append(Spacer(1,4*mm))
     doc.build(story); buf.seek(0)
-    return send_file(buf, mimetype='application/pdf', download_name=data.get('test_id','results')+'_results.pdf')
+    fname = (r['test_name'] or r['test_id'] or 'result') + '_report.pdf'
+    return send_file(buf, mimetype='application/pdf', download_name=fname, as_attachment=True)
 
 # ===== Init =====
 with app.app_context():

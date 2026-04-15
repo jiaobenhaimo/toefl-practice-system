@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — {{ site.name }}{% endblock %}
+{% block title %}Analytics — {{ site.name }}{% endblock %}
 
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
@@ -9,7 +9,7 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">Dashboard</h2>
+        <h2 class="page-heading">Analytics</h2>
 
         {% if students %}
         <div class="form-row" style="margin-bottom:20px">
@@ -34,12 +34,12 @@
                     <canvas id="chart-trend" height="200"></canvas>
                 </div>
                 <div class="card">
-                    <h3 class="card__title">Section Breakdown</h3>
+                    <h3 class="card__title">Performance by Section</h3>
                     <canvas id="chart-sections" height="200"></canvas>
                 </div>
             </div>
             <div class="card">
-                <h3 class="card__title">Weakest Areas</h3>
+                <h3 class="card__title">Areas for Improvement</h3>
                 <div id="weakest-areas"></div>
             </div>
         </div>
