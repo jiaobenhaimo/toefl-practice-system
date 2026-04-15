@@ -58,6 +58,10 @@ let recordingExt = 'ogg';
 })();
 
 /* ======= STORAGE ======= */
+// Server-side session (logged-in users only)
+let serverSessionId = null;
+let isLoggedIn = false;  // Set from template
+
 function storageKey(suffix) {
     const mode = URL_PARAMS.mode || 'full';
     const practice = isPracticeMode ? 'prac_' : '';
@@ -73,22 +77,52 @@ function safeSetItem(key, value) {
     try {
         localStorage.setItem(key, value);
     } catch (e) {
-        console.warn('localStorage write failed (quota exceeded?):', e);
+        console.warn('localStorage write failed:', e);
     }
 }
 
-function saveModuleProgress() {
+async function saveModuleProgress() {
+    if (!currentModule) return;
+    collectAnswer();
+    if (isLoggedIn && serverSessionId) {
+        // Server-side save
+        try {
+            await fetch('/api/session/' + serverSessionId + '/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    answers: answers,
+                    current_page: currentPageIdx,
+                    timer_left: timerSecondsLeft,
+                    question_times: questionTimes,
+                }),
+            });
+        } catch (e) {
+            console.warn('Server save failed, using localStorage fallback:', e);
+            _localSaveModule();
+        }
+    } else {
+        _localSaveModule();
+    }
+}
+
+function _localSaveModule() {
     if (!currentModule) return;
     const mod = playlist[playlistIdx];
     safeSetItem(storageKey('mod_' + moduleKey(mod)), JSON.stringify({
         pageIdx: currentPageIdx,
         answers: answers,
         timerSecondsLeft: timerSecondsLeft,
+        questionTimes: questionTimes,
         savedAt: new Date().toISOString(),
     }));
 }
 
 function savePlaylistState() {
+    if (isLoggedIn && serverSessionId) {
+        // Server already tracks playlist state via advance endpoint
+        return;
+    }
     safeSetItem(storageKey('playlist'), JSON.stringify({
         playlist: playlist,
         playlistIdx: playlistIdx,
@@ -97,6 +131,8 @@ function savePlaylistState() {
 }
 
 function loadModuleProgress(mod) {
+    // For logged-in users, module state comes from session/start response
+    // This is only used as a fallback for guests
     const raw = localStorage.getItem(storageKey('mod_' + moduleKey(mod)));
     return raw ? JSON.parse(raw) : null;
 }
@@ -111,18 +147,38 @@ function markModuleComplete(mod) {
 }
 
 function autoSave() {
-    collectAnswer();
-    saveModuleProgress();
+    saveModuleProgress(); // Now async but fire-and-forget is fine for auto-save
 }
 
 function startAutoSave() {
     stopAutoSave();
-    autoSaveInterval = setInterval(autoSave, 30000);
+    autoSaveInterval = setInterval(autoSave, 15000); // Save every 15s for server sessions
 }
 
 function stopAutoSave() {
     if (autoSaveInterval) clearInterval(autoSaveInterval);
     autoSaveInterval = null;
+}
+
+// Upload recordings for current module to server
+async function uploadModuleRecordings() {
+    if (!isLoggedIn || !serverSessionId) return;
+    const recEntries = Object.entries(recordings).filter(([_, v]) => v instanceof Blob);
+    if (recEntries.length === 0) return;
+    const formData = new FormData();
+    formData.append('_csrf', typeof CSRF_TOKEN !== 'undefined' ? CSRF_TOKEN : '');
+    for (const [qid, blob] of recEntries) {
+        formData.append('rec_' + qid, blob, 'q' + qid + '.' + recordingExt);
+    }
+    try {
+        // Upload to a temporary session recording store
+        await fetch('/api/session/' + serverSessionId + '/upload-recording', {
+            method: 'POST',
+            body: formData,
+        });
+    } catch (e) {
+        console.warn('Recording upload failed:', e);
+    }
 }
 
 /* ======= SCREEN SWITCHING ======= */
@@ -135,18 +191,16 @@ function showScreen(id) {
 }
 
 /* ======= INITIALIZATION ======= */
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     _activeScreen = document.querySelector('.screen--active');
     const mode = URL_PARAMS.mode || 'full';
     isPracticeMode = URL_PARAMS.practice === 'true';
+    isLoggedIn = typeof IS_LOGGED_IN !== 'undefined' && IS_LOGGED_IN;
 
-
-
-    // Force English during test-taking (Chinese only in catalog)
+    // Force English during test-taking
     window._lang = 'en';
 
     if (mode === 'section') {
-        // Section mode - chain all modules of the chosen section
         const sectionName = URL_PARAMS.section;
         const sectionMods = TEST_INFO.modules.filter(m => m.section === sectionName);
         if (!sectionMods.length) {
@@ -155,38 +209,109 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         playlist = sectionMods;
-        playlistIdx = 0;
-        allResults = [];
-        loadAndStartModule();
     } else {
-        // Full test mode - chain all modules in section order
         playlist = [...TEST_INFO.modules];
         if (playlist.length === 0) {
             alert('No modules found in this test.');
             window.location.href = '/';
             return;
         }
-        playlistIdx = 0;
-        allResults = [];
+    }
 
-        // Check for saved playlist progress
-        const saved = loadPlaylistProgress();
-        if (saved && saved.playlistIdx !== undefined) {
-            const resumeIdx = saved.playlistIdx;
-            // Validate: resumeIdx must be > 0 and within bounds
-            if (resumeIdx > 0 && resumeIdx < playlist.length) {
+    playlistIdx = 0;
+    allResults = [];
+
+    // Server-side session for logged-in users
+    if (isLoggedIn) {
+        try {
+            const resp = await fetch('/api/session/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    test_id: TEST_INFO.test_id,
+                    mode: mode,
+                    section: URL_PARAMS.section || null,
+                    practice: isPracticeMode,
+                    playlist: playlist,
+                }),
+            });
+            const sess = await resp.json();
+            serverSessionId = sess.session_id;
+            if (sess.resumed && sess.playlist_idx !== undefined) {
+                const resumeIdx = sess.playlist_idx;
+                if (resumeIdx > 0 && resumeIdx < playlist.length) {
+                    if (confirm(t('resumeConfirm'))) {
+                        playlistIdx = resumeIdx;
+                        allResults = Array.isArray(sess.completed) ? sess.completed : [];
+                        // Module state will be loaded in loadAndStartModule
+                        _serverModuleState = sess;
+                    } else {
+                        // User declined resume — delete old session and create new
+                        await fetch('/api/session/' + serverSessionId, { method: 'DELETE' });
+                        const newResp = await fetch('/api/session/start', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                test_id: TEST_INFO.test_id,
+                                mode: mode,
+                                section: URL_PARAMS.section || null,
+                                practice: isPracticeMode,
+                                playlist: playlist,
+                            }),
+                        });
+                        const newSess = await newResp.json();
+                        serverSessionId = newSess.session_id;
+                        _serverModuleState = null;
+                    }
+                } else if (resumeIdx >= playlist.length) {
+                    // Previous session was completed — clean up
+                    await fetch('/api/session/' + serverSessionId, { method: 'DELETE' });
+                    const newResp = await fetch('/api/session/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            test_id: TEST_INFO.test_id,
+                            mode: mode,
+                            section: URL_PARAMS.section || null,
+                            practice: isPracticeMode,
+                            playlist: playlist,
+                        }),
+                    });
+                    const newSess = await newResp.json();
+                    serverSessionId = newSess.session_id;
+                    _serverModuleState = null;
+                } else {
+                    // playlist_idx is 0, module-level resume
+                    _serverModuleState = sess;
+                }
+            } else {
+                _serverModuleState = null;
+            }
+        } catch (e) {
+            console.warn('Server session failed, falling back to localStorage:', e);
+            _serverModuleState = null;
+        }
+    } else {
+        // Guest: use localStorage
+        _serverModuleState = null;
+        if (mode === 'full') {
+            const saved = loadPlaylistProgress();
+            if (saved && saved.playlistIdx > 0 && saved.playlistIdx < playlist.length) {
                 if (confirm(t('resumeConfirm'))) {
-                    playlistIdx = resumeIdx;
+                    playlistIdx = saved.playlistIdx;
                     allResults = Array.isArray(saved.allResults) ? saved.allResults : [];
                 }
-            } else if (resumeIdx >= playlist.length) {
-                // Test was previously completed - clear stale data
+            } else if (saved && saved.playlistIdx >= playlist.length) {
                 localStorage.removeItem(storageKey('playlist'));
             }
         }
-        loadAndStartModule();
     }
+
+    loadAndStartModule();
 });
+
+// Temporary holder for server module state during init
+let _serverModuleState = null;
 
 /* ======= MODULE LOADING ======= */
 async function loadAndStartModule() {
@@ -219,18 +344,30 @@ async function loadAndStartModule() {
             audioDir: mod.filename.replace('.md', ''),
         };
 
-        // Restore progress or start fresh
-        const saved = loadModuleProgress(mod);
-        if (saved && saved.answers) {
+        // Restore progress from server session or localStorage
+        let saved = null;
+        if (isLoggedIn && _serverModuleState && _serverModuleState.answers && Object.keys(_serverModuleState.answers).length > 0) {
+            saved = {
+                answers: _serverModuleState.answers,
+                pageIdx: _serverModuleState.current_page,
+                timerSecondsLeft: _serverModuleState.timer_left,
+                questionTimes: _serverModuleState.question_times || {},
+            };
+            _serverModuleState = null; // Consume it
+        } else if (!isLoggedIn) {
+            saved = loadModuleProgress(mod);
+        }
+        if (saved && saved.answers && Object.keys(saved.answers).length > 0) {
             answers = saved.answers;
             currentPageIdx = saved.pageIdx ?? 0;
-            // If timer was saved as 0 or negative (expired), use full time
+            questionTimes = saved.questionTimes || {};
             const restoredTime = saved.timerSecondsLeft;
             timerSecondsLeft = (restoredTime != null && restoredTime > 0) ? restoredTime : (mod.timer_minutes * 60);
         } else {
             answers = {};
             currentPageIdx = 0;
             timerSecondsLeft = mod.timer_minutes * 60;
+            questionTimes = {};
         }
         recordings = {};
         playedAudio = new Set();
@@ -1167,7 +1304,10 @@ async function finishCurrentModule() {
     // Record time for current question before grading
     recordQuestionTime();
 
-    // Server-side grading
+    // Upload recordings immediately (per-module, not at the end)
+    await uploadModuleRecordings();
+
+    // Server-side grading (no client-side fallback for security)
     const mod = playlist[playlistIdx];
     let result;
     try {
@@ -1181,12 +1321,15 @@ async function finishCurrentModule() {
                 times: questionTimes,
             }),
         });
+        if (!gradeResp.ok) throw new Error('Grading failed: ' + gradeResp.status);
         result = await gradeResp.json();
     } catch (e) {
-        // Fallback to client-side grading if server unreachable
-        result = gradeModule(currentModule, answers, recordings, questionTimes);
+        alert('Failed to submit answers. Please check your connection and try again.');
+        isFinishing = false;
+        startAutoSave();
+        return;
     }
-    // Attach recordings for zip download (not sent to server)
+    // Attach recordings for zip download
     result.recordings = { ...recordings };
     result.hasDownloadable = Object.keys(recordings).length > 0 ||
         currentModule.pages.some(p => ['email','discussion'].includes(p.question_type));
@@ -1202,6 +1345,37 @@ async function finishCurrentModule() {
 
     // Advance playlist
     playlistIdx++;
+
+    // Advance server session
+    if (isLoggedIn && serverSessionId) {
+        try {
+            const advResp = await fetch('/api/session/' + serverSessionId + '/advance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    playlist_idx: playlistIdx,
+                    graded_result: {
+                        section: result.section,
+                        moduleNum: result.moduleNum,
+                        score: result.score,
+                        details: result.details,
+                    },
+                }),
+            });
+            const advData = await advResp.json();
+            // Update _serverModuleState with new timer for next module
+            if (playlistIdx < playlist.length) {
+                _serverModuleState = {
+                    answers: {},
+                    current_page: 0,
+                    timer_left: advData.timer_left || 0,
+                    question_times: {},
+                };
+            }
+        } catch (e) {
+            console.warn('Session advance failed:', e);
+        }
+    }
 
     if (playlistIdx < playlist.length) {
         savePlaylistState();
@@ -1396,7 +1570,7 @@ async function showFinalResults() {
 
     // Save results to server (for logged-in users)
     try {
-        await fetch('/api/save-results', {
+        const saveResp = await fetch('/api/save-results', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1405,12 +1579,46 @@ async function showFinalResults() {
                 practice: isPracticeMode,
                 total_correct: totalCorrect,
                 total_questions: totalQuestions,
+                session_id: serverSessionId || null,
                 sections: allResults.map(r => ({
                     section: r.section, moduleNum: r.moduleNum,
                     score: r.score, details: r.details,
                 })),
             }),
         });
+        const saveData = await saveResp.json();
+        // Move session recordings to result storage if we got a result_id
+        if (saveData.ok && saveData.result_id && serverSessionId) {
+            try {
+                await fetch('/api/session/' + serverSessionId + '/finalize-recordings/' + saveData.result_id, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                });
+            } catch (e) {}
+        }
+        // Also upload any recordings still in memory (fallback / guest)
+        if (saveData.ok && saveData.result_id) {
+            const formData = new FormData();
+            formData.append('_csrf', typeof CSRF_TOKEN !== 'undefined' ? CSRF_TOKEN : '');
+            let hasRecordings = false;
+            for (const result of allResults) {
+                if (result.recordings) {
+                    for (const [qid, blob] of Object.entries(result.recordings)) {
+                        if (blob instanceof Blob) {
+                            formData.append('rec_' + qid, blob, 'q' + qid + '.' + recordingExt);
+                            hasRecordings = true;
+                        }
+                    }
+                }
+            }
+            if (hasRecordings) {
+                await fetch('/api/upload-recording/' + saveData.result_id, {
+                    method: 'POST',
+                    body: formData,
+                });
+            }
+        }
     } catch (e) {}
 }
 

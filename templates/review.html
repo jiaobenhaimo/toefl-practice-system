@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% block title %}Review: {{ result.test_name or result.test_id }} — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div id="app" class="test-page">
+    <div id="review-loading" class="screen screen--active">
+        <div class="loading-msg">Loading review…</div>
+    </div>
+
+    <div id="review-main" class="screen">
+        <header class="test-header" role="banner">
+            <div class="test-header__left">
+                <a href="/results/{{ result.id }}" class="btn btn--icon" title="Back to results" aria-label="Back to results">
+                    <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4L7 10l6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+                </a>
+                <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-test">
+                    <svg width="20" height="20" viewBox="0 0 20 20" id="theme-icon-test"></svg>
+                </button>
+            </div>
+            <div class="test-header__center">
+                <div class="test-header__section" id="rv-section-label">Review</div>
+            </div>
+            <div class="test-header__right">
+                <span id="rv-score" style="font-size:0.88rem;font-weight:600;color:var(--text-muted)"></span>
+            </div>
+        </header>
+
+        <div class="progress-dots-row" id="rv-progress-row">
+            <div class="progress-dots" id="rv-dots" role="group" aria-label="Question progress"></div>
+            <span class="progress-counter" id="rv-counter"></span>
+        </div>
+
+        <div class="test-body" id="rv-body" role="main"></div>
+
+        <footer class="test-footer" role="navigation" aria-label="Question navigation">
+            <button class="btn btn--secondary" id="rv-prev" onclick="rvPrev()" aria-label="Previous question">&larr; Previous</button>
+            <div class="test-footer__spacer"></div>
+            <button class="btn btn--primary" id="rv-next" onclick="rvNext()" aria-label="Next question">Next &rarr;</button>
+        </footer>
+    </div>
+</div>
+
+<script>
+var RESULT_ID = {{ result.id }};
+var USER_ROLE = {{ user.role|tojson }};
+var _data = null;     // Full review data from API
+var _allPages = [];   // Flattened list of {page, moduleIdx, section, module}
+var _pageIdx = 0;
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+async function loadReview() {
+    try {
+        var resp = await fetch('/api/review-data/' + RESULT_ID);
+        _data = await resp.json();
+    } catch (e) {
+        document.getElementById('review-loading').innerHTML = '<div class="loading-msg">Failed to load review data.</div>';
+        return;
+    }
+    // Flatten all pages across modules
+    _allPages = [];
+    _data.modules.forEach(function(mod, mi) {
+        (mod.pages || []).forEach(function(pg) {
+            _allPages.push({ page: pg, moduleIdx: mi, section: mod.section, module: mod.module });
+        });
+    });
+    if (!_allPages.length) {
+        document.getElementById('review-loading').innerHTML = '<div class="loading-msg">No questions found.</div>';
+        return;
+    }
+    document.getElementById('review-loading').classList.remove('screen--active');
+    document.getElementById('review-main').classList.add('screen--active');
+    buildDots();
+    renderPage();
+}
+
+function buildDots() {
+    var container = document.getElementById('rv-dots');
+    container.innerHTML = '';
+    _allPages.forEach(function(item, i) {
+        var dot = document.createElement('span');
+        dot.className = 'progress-dot';
+        var g = item.page.graded || {};
+        if (g.correct === true) dot.classList.add('progress-dot--correct');
+        else if (g.correct === false) dot.classList.add('progress-dot--wrong');
+        else dot.classList.add('progress-dot--answered');
+        dot.onclick = function() { _pageIdx = i; renderPage(); };
+        dot.style.cursor = 'pointer';
+        container.appendChild(dot);
+    });
+}
+
+function updateDots() {
+    var dots = document.getElementById('rv-dots').children;
+    for (var i = 0; i < dots.length; i++) {
+        dots[i].classList.toggle('progress-dot--current', i === _pageIdx);
+    }
+    document.getElementById('rv-counter').textContent = (_pageIdx + 1) + ' / ' + _allPages.length;
+}
+
+function renderPage() {
+    var item = _allPages[_pageIdx];
+    var pg = item.page;
+    var g = pg.graded || {};
+    var qid = pg.question_id || '';
+    var body = document.getElementById('rv-body');
+    body.innerHTML = '';
+    body.classList.remove('test-body--splitpane');
+    body.scrollTop = 0;
+    window.scrollTo(0, 0);
+
+    // Header info
+    document.getElementById('rv-section-label').textContent = (item.section.charAt(0).toUpperCase() + item.section.slice(1)) + ' — Module ' + item.module;
+    var scoreEl = document.getElementById('rv-score');
+    if (g.correct === true) scoreEl.innerHTML = '<span style="color:var(--green)">✓ Correct</span>';
+    else if (g.correct === false) scoreEl.innerHTML = '<span style="color:var(--red)">✗ Wrong</span>';
+    else if (g.type === 'email' || g.type === 'discussion') scoreEl.innerHTML = '<span style="color:var(--text-muted)">' + (g.wordCount || 0) + ' words</span>';
+    else if (g.type === 'listen_repeat' || g.type === 'interview') scoreEl.innerHTML = '<span style="color:var(--text-muted)">' + (g.hasRecording ? 'Recorded' : 'No recording') + '</span>';
+    else scoreEl.textContent = '';
+
+    // Time spent
+    if (g.time) {
+        scoreEl.innerHTML += ' <span style="color:var(--text-dim);margin-left:8px">' + g.time + 's</span>';
+    }
+
+    // Group title
+    if (pg.group_title) body.appendChild(mkEl('div', 'group-label', pg.group_title));
+
+    // Question content by type
+    if (pg.question_type === 'mc') renderMCReview(body, pg, g);
+    else if (pg.question_type === 'cloze') renderClozeReview(body, pg);
+    else if (pg.question_type === 'build_sentence') renderBuildReview(body, pg, g);
+    else if (pg.question_type === 'email' || pg.question_type === 'discussion') renderWriteReview(body, pg, g);
+    else if (pg.question_type === 'listen_repeat' || pg.question_type === 'interview') renderSpeakReview(body, pg, g);
+
+    // Explanation
+    var expl = _data.explanations[qid];
+    if (expl) {
+        var box = mkEl('div', 'review-panel review-panel--explanation');
+        box.innerHTML = '<strong>Explanation</strong><div style="margin-top:6px">' + expl + '</div>';
+        body.appendChild(box);
+    }
+
+    // Teacher comment
+    var cmt = _data.comments[qid];
+    if (cmt && cmt.comment) {
+        var box = mkEl('div', 'review-panel review-panel--comment');
+        box.innerHTML = '<strong>Teacher</strong><div style="margin-top:6px">' + esc(cmt.comment) + '</div><div style="font-size:0.82rem;color:var(--text-dim);margin-top:4px">— ' + esc(cmt.teacher) + '</div>';
+        body.appendChild(box);
+    }
+
+    // Student note
+    var noteVal = _data.notes[qid] || '';
+    var noteBox = mkEl('div', 'review-panel review-panel--note');
+    noteBox.innerHTML = '<strong>My Notes</strong>';
+    var ta = document.createElement('textarea');
+    ta.className = 'note-area';
+    ta.placeholder = 'Add a note…';
+    ta.rows = 3;
+    ta.value = noteVal;
+    ta.onblur = function() {
+        fetch('/api/notes/' + RESULT_ID, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({question_id: qid, note: ta.value.trim()})
+        });
+        _data.notes[qid] = ta.value.trim();
+    };
+    noteBox.appendChild(ta);
+
+    // Teacher comment input for teachers
+    if (USER_ROLE === 'admin' || USER_ROLE === 'teacher') {
+        var tcBox = mkEl('div', '');
+        tcBox.innerHTML = '<strong style="display:block;margin-top:12px;font-size:0.88rem;color:var(--listening)">Add Teacher Comment</strong>';
+        var tca = document.createElement('textarea');
+        tca.className = 'note-area';
+        tca.style.borderColor = 'var(--listening)';
+        tca.placeholder = 'Teacher comment…';
+        tca.rows = 2;
+        var existingCmt = _data.comments[qid];
+        tca.value = existingCmt ? existingCmt.comment : '';
+        tca.onblur = function() {
+            fetch('/api/comments/' + RESULT_ID, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({question_id: qid, comment: tca.value.trim()})
+            });
+            if (!_data.comments[qid]) _data.comments[qid] = {};
+            _data.comments[qid].comment = tca.value.trim();
+        };
+        tcBox.appendChild(tca);
+        noteBox.appendChild(tcBox);
+    }
+    body.appendChild(noteBox);
+
+    // Nav buttons
+    document.getElementById('rv-prev').style.display = _pageIdx > 0 ? '' : 'none';
+    var nextBtn = document.getElementById('rv-next');
+    nextBtn.textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Back to Results';
+
+    updateDots();
+}
+
+function rvNext() {
+    if (_pageIdx < _allPages.length - 1) { _pageIdx++; renderPage(); }
+    else { window.location.href = '/results/' + RESULT_ID; }
+}
+function rvPrev() {
+    if (_pageIdx > 0) { _pageIdx--; renderPage(); }
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); rvNext(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); rvPrev(); }
+});
+
+function mkEl(tag, cls, html) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html !== undefined) e.innerHTML = html;
+    return e;
+}
+
+/* ======= QUESTION RENDERERS (read-only) ======= */
+
+function renderMCReview(body, pg, g) {
+    var hasPassage = pg.section === 'reading' && pg.passage_html;
+    if (hasPassage) {
+        body.classList.add('test-body--splitpane');
+        var pane = mkEl('div', 'split-pane');
+        var left = mkEl('div', 'split-pane__left');
+        var pass = mkEl('div', 'passage-panel passage-panel--full');
+        pass.innerHTML = pg.passage_html;
+        left.appendChild(pass);
+        pane.appendChild(left);
+        var right = mkEl('div', 'split-pane__right');
+        if (pg.group_title) right.appendChild(mkEl('div', 'group-label', pg.group_title));
+        if (pg.prompt_html) { var p = mkEl('div', 'question-prompt'); p.innerHTML = pg.prompt_html; right.appendChild(p); }
+        right.appendChild(buildReviewChoices(pg, g));
+        pane.appendChild(right);
+        // Remove the top-level group label
+        var el = body.querySelector('.group-label');
+        if (el) el.remove();
+        body.appendChild(pane);
+    } else {
+        if (pg.passage_html) { var p = mkEl('div', 'passage-panel'); p.innerHTML = pg.passage_html; body.appendChild(p); }
+        if (pg.audio) body.appendChild(mkAudioPlayer(pg.audio));
+        if (pg.prompt_html) { var p = mkEl('div', 'question-prompt'); p.innerHTML = pg.prompt_html; body.appendChild(p); }
+        body.appendChild(buildReviewChoices(pg, g));
+    }
+}
+
+function buildReviewChoices(pg, g) {
+    var userAns = g.user || '';
+    var correctAns = g.expected || pg.answer || '';
+    var div = mkEl('div', 'choices');
+    for (var letter in (pg.choices || {})) {
+        var text = pg.choices[letter];
+        var label = mkEl('label', 'choice');
+        label.style.pointerEvents = 'none';
+        // Color coding
+        if (letter === correctAns) label.classList.add('choice--correct');
+        if (letter === userAns && userAns !== correctAns) label.classList.add('choice--wrong');
+        if (letter === userAns) label.classList.add('choice--selected');
+        var radio = document.createElement('input');
+        radio.type = 'radio'; radio.disabled = true;
+        if (letter === userAns) radio.checked = true;
+        label.appendChild(radio);
+        label.appendChild(mkEl('span', 'choice__text', esc(text)));
+        div.appendChild(label);
+    }
+    return div;
+}
+
+function renderClozeReview(body, pg) {
+    if (pg.passage_html) {
+        var passEl = mkEl('div', 'passage-panel');
+        passEl.innerHTML = pg.passage_html;
+        body.appendChild(passEl);
+    }
+    var details = pg.cloze_details || [];
+    if (details.length) {
+        var table = mkEl('div', 'review-cloze-table');
+        details.forEach(function(d, i) {
+            var row = mkEl('div', 'review-cloze-row ' + (d.correct ? 'review-cloze-row--correct' : 'review-cloze-row--wrong'));
+            row.innerHTML = '<span class="review-cloze-row__num">' + (i+1) + '</span>' +
+                '<span class="review-cloze-row__user">' + esc(d.user || '—') + '</span>' +
+                '<span class="review-cloze-row__arrow">→</span>' +
+                '<span class="review-cloze-row__answer">' + esc(d.fullWord || d.expected || '') + '</span>' +
+                '<span class="review-cloze-row__icon">' + (d.correct ? '✓' : '✗') + '</span>';
+            table.appendChild(row);
+        });
+        body.appendChild(table);
+    }
+}
+
+function renderBuildReview(body, pg, g) {
+    if (pg.details && pg.details.context_html) {
+        var ctx = mkEl('div', 'passage-panel');
+        ctx.innerHTML = pg.details.context_html;
+        body.appendChild(ctx);
+    }
+    var userAns = g.user || '—';
+    var expected = g.expected || pg.answer || '';
+    var box = mkEl('div', 'review-compare');
+    box.innerHTML =
+        '<div class="review-compare__row"><span class="review-compare__label">Your answer</span><span class="review-compare__value ' + (g.correct ? 'review-compare__value--correct' : 'review-compare__value--wrong') + '">' + esc(userAns) + '</span></div>' +
+        '<div class="review-compare__row"><span class="review-compare__label">Correct</span><span class="review-compare__value review-compare__value--expected">' + esc(expected) + '</span></div>';
+    body.appendChild(box);
+}
+
+function renderWriteReview(body, pg, g) {
+    if (pg.content_html) {
+        var prompt = mkEl('div', 'passage-panel');
+        prompt.innerHTML = pg.content_html;
+        body.appendChild(prompt);
+    }
+    var text = g.user || '';
+    if (text) {
+        var box = mkEl('div', 'writing-response');
+        box.innerHTML = '<div class="writing-response__text">' + esc(text).replace(/\n/g, '<br>') + '</div>';
+        body.appendChild(box);
+    } else {
+        body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No response submitted</em>'));
+    }
+}
+
+function renderSpeakReview(body, pg, g) {
+    if (pg.content_html) {
+        var prompt = mkEl('div', 'passage-panel');
+        prompt.innerHTML = pg.content_html;
+        body.appendChild(prompt);
+    }
+    var qid = pg.question_id || '';
+    if (_data.recordings.indexOf(qid) !== -1) {
+        var audio = document.createElement('audio');
+        audio.controls = true;
+        audio.preload = 'none';
+        audio.className = 'recording-player';
+        audio.innerHTML = '<source src="/recordings/' + RESULT_ID + '/' + encodeURIComponent(qid) + '">';
+        body.appendChild(audio);
+    } else if (g.hasRecording) {
+        body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>Recording not available on server</em>'));
+    } else {
+        body.appendChild(mkEl('div', 'review-panel review-panel--empty', '<em>No recording</em>'));
+    }
+}
+
+function mkAudioPlayer(src) {
+    var audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'auto';
+    audio.className = 'recording-player';
+    audio.style.marginBottom = '16px';
+    audio.innerHTML = '<source src="/audio/' + esc(src) + '">';
+    return audio;
+}
+
+document.addEventListener('DOMContentLoaded', loadReview);
+</script>
+{% endblock %}

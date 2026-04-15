@@ -21,6 +21,10 @@
             &middot; {{ result.total_correct }}/{{ result.total_questions }}
             ({{ (result.total_correct / result.total_questions * 100)|round|int }}%)
             {% endif %}
+            <a href="/review/{{ result.id }}" class="btn btn--primary" style="margin-left:16px;display:inline-flex;align-items:center;gap:6px;font-size:0.88rem;padding:0 16px">
+                <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 2h12v9H5l-3 3V2z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>
+                Review Test
+            </a>
         </p>
 
         <div id="result-sections"></div>
@@ -213,11 +217,21 @@
                         html += '<span class="result-row__q">Q' + esc(String(d.qid)) + '</span>';
                         html += '<span class="result-row__ans">' + esc(d.type) + ' \u2014 ' + (d.wordCount || 0) + ' words</span>';
                         html += timeLabel + noteBtn + '</div>';
+                        // Show the full writing response (expandable)
+                        if (d.user && d.user.length > 0) {
+                            html += '<div class="note-area-wrap note-area-wrap--sub"><div class="writing-response">';
+                            html += '<div class="writing-response__text">' + esc(d.user).replace(/\n/g, '<br>') + '</div>';
+                            html += '</div></div>';
+                        }
                     } else if (d.type === 'listen_repeat' || d.type === 'interview') {
                         html += '<div class="result-row ' + (d.hasRecording ? 'result-row--neutral' : 'result-row--wrong') + '">';
                         html += '<span class="result-row__q">Q' + esc(String(d.qid)) + '</span>';
                         html += '<span class="result-row__ans">' + (d.hasRecording ? 'Audio recorded' : 'No recording') + '</span>';
                         html += timeLabel + noteBtn + '</div>';
+                        // Audio player placeholder (filled after loading recording list)
+                        if (d.hasRecording) {
+                            html += '<div class="note-area-wrap note-area-wrap--sub" data-audio-wrap="' + esc(d.qid) + '"><audio controls preload="none" class="recording-player" data-rec-qid="' + esc(d.qid) + '"><source src="/recordings/' + RESULT_ID + '/' + encodeURIComponent(d.qid) + '"></audio></div>';
+                        }
                     }
 
                     // Note area (hidden by default)
@@ -250,6 +264,17 @@
                     }
                 }
             }, 100);
+
+            // Check which recordings are available on server
+            fetch('/api/recordings/' + RESULT_ID).then(function(r) { return r.json(); }).then(function(availableQids) {
+                document.querySelectorAll('[data-audio-wrap]').forEach(function(wrap) {
+                    var qid = wrap.getAttribute('data-audio-wrap');
+                    if (availableQids.indexOf(qid) === -1) {
+                        // No server recording — show fallback text
+                        wrap.innerHTML = '<span style="font-size:0.85rem;color:var(--text-muted);font-style:italic">Recording not available on server</span>';
+                    }
+                });
+            }).catch(function(){});
         })();
         </script>
     </main>

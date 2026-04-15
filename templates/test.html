@@ -86,6 +86,8 @@
 <script>
     const TEST_INFO = {{ test_info|tojson }};
     const URL_PARAMS = Object.fromEntries(new URLSearchParams(window.location.search));
+    const CSRF_TOKEN = {{ csrf_token()|tojson }};
+    const IS_LOGGED_IN = {{ 'true' if user else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% endblock %}

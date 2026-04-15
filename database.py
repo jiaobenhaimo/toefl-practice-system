@@ -90,6 +90,26 @@ CREATE TABLE IF NOT EXISTS question_explanations (
     FOREIGN KEY (author_id) REFERENCES users(id),
     UNIQUE(test_id, question_id)
 );
+
+CREATE TABLE IF NOT EXISTS test_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    test_id TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'full',
+    section TEXT DEFAULT NULL,
+    practice INTEGER NOT NULL DEFAULT 0,
+    playlist_json TEXT NOT NULL DEFAULT '[]',
+    playlist_idx INTEGER NOT NULL DEFAULT 0,
+    answers_json TEXT NOT NULL DEFAULT '{}',
+    current_page INTEGER NOT NULL DEFAULT 0,
+    timer_left INTEGER NOT NULL DEFAULT 0,
+    question_times_json TEXT NOT NULL DEFAULT '{}',
+    completed_json TEXT NOT NULL DEFAULT '[]',
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
 """
 
 
@@ -198,8 +218,9 @@ def update_user(user_id, display_name=None, password=None, role=None):
 
 
 def delete_user(user_id):
-    """Delete user and their results, assignments, notes, and comments."""
+    """Delete user and their results, assignments, notes, comments, and sessions."""
     conn = get_db()
+    conn.execute("DELETE FROM test_sessions WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM teacher_comments WHERE teacher_id=?", (user_id,))
     conn.execute("DELETE FROM student_notes WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_results WHERE user_id=?", (user_id,))
@@ -212,15 +233,17 @@ def delete_user(user_id):
 # ===== Test results =====
 
 def save_result(user_id, test_id, test_name, practice, total_correct, total_questions, sections_json):
-    """Save a test result."""
+    """Save a test result. Returns the new result ID."""
     conn = get_db()
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO test_results (user_id, test_id, test_name, practice, total_correct, total_questions, sections_json) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (user_id, test_id, test_name, 1 if practice else 0, total_correct, total_questions, sections_json)
     )
+    result_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return result_id
 
 
 def get_result_by_id(result_id):
@@ -457,3 +480,87 @@ def get_analytics(user_id):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ===== Test Sessions (server-side progress) =====
+
+def create_session(user_id, test_id, mode, section, practice, playlist_json, timer_left):
+    """Create a new test session. Returns session ID. Also cleans up stale sessions."""
+    conn = get_db()
+    # Clean up stale unfinished sessions older than 7 days
+    conn.execute(
+        "DELETE FROM test_sessions WHERE finished=0 AND updated_at < datetime('now', '-7 days')"
+    )
+    # Clean up finished sessions older than 30 days
+    conn.execute(
+        "DELETE FROM test_sessions WHERE finished=1 AND updated_at < datetime('now', '-30 days')"
+    )
+    cur = conn.execute(
+        "INSERT INTO test_sessions (user_id, test_id, mode, section, practice, playlist_json, timer_left) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, test_id, mode, section, 1 if practice else 0, playlist_json, timer_left)
+    )
+    sid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return sid
+
+
+def get_active_session(user_id, test_id, mode, section, practice):
+    """Find an unfinished session for this user/test/mode combo."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM test_sessions WHERE user_id=? AND test_id=? AND mode=? "
+        "AND section IS ? AND practice=? AND finished=0 ORDER BY updated_at DESC LIMIT 1",
+        (user_id, test_id, mode, section, 1 if practice else 0)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_session(session_id):
+    """Get session by ID."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM test_sessions WHERE id=?", (session_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_session_progress(session_id, answers_json, current_page, timer_left, question_times_json):
+    """Update in-progress session state."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE test_sessions SET answers_json=?, current_page=?, timer_left=?, "
+        "question_times_json=?, updated_at=datetime('now') WHERE id=?",
+        (answers_json, current_page, timer_left, question_times_json, session_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def advance_session(session_id, playlist_idx, completed_json, answers_json='{}', timer_left=0):
+    """Advance to next module after grading."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE test_sessions SET playlist_idx=?, completed_json=?, answers_json=?, "
+        "current_page=0, timer_left=?, question_times_json='{}', updated_at=datetime('now') WHERE id=?",
+        (playlist_idx, completed_json, answers_json, timer_left, session_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def finish_session(session_id):
+    """Mark session as finished."""
+    conn = get_db()
+    conn.execute("UPDATE test_sessions SET finished=1, updated_at=datetime('now') WHERE id=?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_session(session_id):
+    """Delete a session."""
+    conn = get_db()
+    conn.execute("DELETE FROM test_sessions WHERE id=?", (session_id,))
+    conn.commit()
+    conn.close()

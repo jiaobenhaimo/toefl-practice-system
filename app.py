@@ -2,7 +2,7 @@
 app.py — Flask application for TOEFL Practice Test System.
 Auth, admin, teacher dashboards, server-side grading.
 """
-import os, json, secrets, re, markdown, yaml, time, copy
+import os, json, secrets, re, markdown, yaml, time, copy, shutil
 from functools import wraps
 from flask import (
     Flask, render_template, jsonify, request, session,
@@ -84,8 +84,13 @@ _RATE_LIMIT_WINDOW = 300  # 5 minutes
 _RATE_LIMIT_MAX = 10  # max attempts per window
 
 def _check_rate_limit(ip):
-    """Returns True if rate limited."""
+    """Returns True if rate limited. Also prunes stale IPs."""
     now = time.time()
+    # Prune stale entries every 100 checks to bound memory
+    if len(_login_attempts) > 1000:
+        stale = [k for k, v in _login_attempts.items() if not v or now - v[-1] > _RATE_LIMIT_WINDOW]
+        for k in stale:
+            del _login_attempts[k]
     attempts = _login_attempts.get(ip, [])
     attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
     _login_attempts[ip] = attempts
@@ -258,7 +263,9 @@ def api_module(filename):
 
 @app.route('/api/grade', methods=['POST'])
 def api_grade():
-    """Server-side grading."""
+    """Server-side grading. Returns scores and per-question details."""
+    u = cur_user(); g = session.get('guest', False)
+    if not u and not g: abort(401)  # Require login or guest session
     data = request.get_json()
     if not data: abort(400)
     fp = safe_path(TESTS_DIR, data.get('filename',''))
@@ -301,7 +308,18 @@ def api_grade():
             details.append({'qid':qid,'type':qt,'user':ua,'wordCount':wc,'time':ts})
         elif qt in ('listen_repeat','interview'):
             details.append({'qid':qid,'type':qt,'hasRecording':ua=='[audio recorded]','time':ts})
-    return jsonify({'section':mod['section'],'moduleNum':mod['module'],'score':{'correct':correct,'total':total},'details':details})
+    # Client response: no expected answers visible
+    client_details = []
+    for d in details:
+        cd = dict(d)
+        cd.pop('expected', None)
+        cd.pop('fullWord', None)
+        client_details.append(cd)
+    return jsonify({
+        'section':mod['section'],'moduleNum':mod['module'],
+        'score':{'correct':correct,'total':total},
+        'details': client_details,
+    })
 
 @app.route('/api/save-results', methods=['POST'])
 def api_save_results():
@@ -309,10 +327,225 @@ def api_save_results():
     if not u: return jsonify({'ok':False}), 401
     data = request.get_json()
     if not data: abort(400)
-    db.save_result(u['id'], data.get('test_id',''), data.get('test_name',''),
+    # Enrich sections with expected answers (client doesn't have them)
+    sections = data.get('sections', [])
+    test_id = data.get('test_id', '')
+    tests = _cached_scan()
+    if test_id in tests:
+        # Build answer key from all modules
+        answer_key = {}  # {qid: {'expected': ..., 'fullWord': ...}}
+        t = tests[test_id]
+        seen_files = set()
+        for mod_info in t['modules']:
+            fn = mod_info['filename']
+            if fn in seen_files: continue
+            seen_files.add(fn)
+            fp = safe_path(TESTS_DIR, fn)
+            if fp and os.path.exists(fp):
+                parsed = _cached_parse(fp)
+                for mod in parsed['modules']:
+                    for pg in build_question_list(mod):
+                        qid = str(pg.get('question_id', ''))
+                        qt = pg.get('question_type', '')
+                        if qt == 'mc':
+                            answer_key[qid] = {'expected': pg.get('answer', '')}
+                        elif qt == 'cloze':
+                            fills = pg.get('cloze_fills', [])
+                            words = pg.get('cloze_answers', [])
+                            for i, ef in enumerate(fills):
+                                cqid = f'{qid}.{i+1}'
+                                answer_key[cqid] = {'expected': ef, 'fullWord': words[i] if i < len(words) else ef}
+                        elif qt == 'build_sentence':
+                            answer_key[qid] = {'expected': pg.get('answer', '')}
+        # Merge expected answers into section details
+        for sec in sections:
+            for d in sec.get('details', []):
+                qid = str(d.get('qid', ''))
+                if qid in answer_key:
+                    d.update(answer_key[qid])
+    result_id = db.save_result(u['id'], test_id, data.get('test_name',''),
         data.get('practice',False), data.get('total_correct',0),
-        data.get('total_questions',0), json.dumps(data.get('sections',[])))
-    return jsonify({'ok':True})
+        data.get('total_questions',0), json.dumps(sections))
+    # Clean up the session if provided
+    session_id = data.get('session_id')
+    if session_id:
+        try: db.finish_session(session_id)
+        except Exception: pass
+    return jsonify({'ok':True, 'result_id': result_id})
+
+# ===== Server-side Test Sessions =====
+
+@app.route('/api/session/start', methods=['POST'])
+@require_login
+def api_session_start():
+    """Start or resume a test session. Returns session state."""
+    u = cur_user()
+    data = request.get_json()
+    if not data: abort(400)
+    test_id = data.get('test_id', '')
+    mode = data.get('mode', 'full')
+    section = data.get('section') or None
+    practice = data.get('practice', False)
+    playlist = data.get('playlist', [])
+    # Check for existing active session
+    existing = db.get_active_session(u['id'], test_id, mode, section, practice)
+    if existing:
+        return jsonify({
+            'session_id': existing['id'],
+            'resumed': True,
+            'playlist_idx': existing['playlist_idx'],
+            'answers': json.loads(existing['answers_json']) if existing['answers_json'] else {},
+            'current_page': existing['current_page'],
+            'timer_left': existing['timer_left'],
+            'question_times': json.loads(existing['question_times_json']) if existing['question_times_json'] else {},
+            'completed': json.loads(existing['completed_json']) if existing['completed_json'] else [],
+        })
+    # Create new session
+    timer_left = 0
+    if playlist:
+        # Use first module's timer
+        tests = _cached_scan()
+        if test_id in tests:
+            mods = tests[test_id]['modules']
+            if mode == 'section':
+                mods = [m for m in mods if m['section'] == section]
+            if mods:
+                timer_left = mods[0].get('timer_minutes', 0) * 60
+    sid = db.create_session(u['id'], test_id, mode, section, practice, json.dumps(playlist), timer_left)
+    return jsonify({
+        'session_id': sid,
+        'resumed': False,
+        'playlist_idx': 0,
+        'answers': {},
+        'current_page': 0,
+        'timer_left': timer_left,
+        'question_times': {},
+        'completed': [],
+    })
+
+@app.route('/api/session/<int:sid>/save', methods=['POST'])
+@require_login
+def api_session_save(sid):
+    """Save current progress: answers, page, timer, question times."""
+    u = cur_user()
+    sess = db.get_session(sid)
+    if not sess or sess['user_id'] != u['id']: abort(403)
+    if sess['finished']: return jsonify({'ok': False, 'error': 'session finished'})
+    data = request.get_json()
+    if not data: abort(400)
+    db.save_session_progress(
+        sid,
+        json.dumps(data.get('answers', {})),
+        data.get('current_page', 0),
+        data.get('timer_left', 0),
+        json.dumps(data.get('question_times', {}))
+    )
+    return jsonify({'ok': True})
+
+@app.route('/api/session/<int:sid>/advance', methods=['POST'])
+@require_login
+def api_session_advance(sid):
+    """Advance to next module after grading. Stores graded result in completed list."""
+    u = cur_user()
+    sess = db.get_session(sid)
+    if not sess or sess['user_id'] != u['id']: abort(403)
+    data = request.get_json()
+    if not data: abort(400)
+    new_idx = data.get('playlist_idx', sess['playlist_idx'] + 1)
+    playlist = json.loads(sess['playlist_json']) if sess['playlist_json'] else []
+    # Validate bounds
+    if new_idx < 0 or new_idx > len(playlist):
+        return jsonify({'ok': False, 'error': 'playlist_idx out of bounds'}), 400
+    # Merge the new graded result into the completed list
+    completed = json.loads(sess['completed_json']) if sess['completed_json'] else []
+    graded = data.get('graded_result')
+    if graded:
+        completed.append(graded)
+    # Get timer for next module
+    timer_left = 0
+    if new_idx < len(playlist):
+        next_mod = playlist[new_idx]
+        timer_left = next_mod.get('timer_minutes', 0) * 60
+    db.advance_session(sid, new_idx, json.dumps(completed), '{}', timer_left)
+    return jsonify({'ok': True, 'timer_left': timer_left})
+
+@app.route('/api/session/<int:sid>', methods=['GET'])
+@require_login
+def api_session_get(sid):
+    """Load full session state."""
+    u = cur_user()
+    sess = db.get_session(sid)
+    if not sess or sess['user_id'] != u['id']: abort(403)
+    return jsonify({
+        'session_id': sess['id'],
+        'test_id': sess['test_id'],
+        'mode': sess['mode'],
+        'section': sess['section'],
+        'practice': bool(sess['practice']),
+        'playlist_idx': sess['playlist_idx'],
+        'answers': json.loads(sess['answers_json']) if sess['answers_json'] else {},
+        'current_page': sess['current_page'],
+        'timer_left': sess['timer_left'],
+        'question_times': json.loads(sess['question_times_json']) if sess['question_times_json'] else {},
+        'completed': json.loads(sess['completed_json']) if sess['completed_json'] else [],
+        'finished': bool(sess['finished']),
+    })
+
+@app.route('/api/session/<int:sid>', methods=['DELETE'])
+@require_login
+def api_session_delete(sid):
+    """Delete/abandon a session."""
+    u = cur_user()
+    sess = db.get_session(sid)
+    if not sess or sess['user_id'] != u['id']: abort(403)
+    db.delete_session(sid)
+    # Clean up session recordings
+    sess_rec_dir = os.path.join(RECORDINGS_DIR, 'session_' + str(sid))
+    if os.path.isdir(sess_rec_dir):
+        shutil.rmtree(sess_rec_dir, ignore_errors=True)
+    return jsonify({'ok': True})
+
+@app.route('/api/session/<int:sid>/upload-recording', methods=['POST'])
+@require_login
+def api_session_upload_recording(sid):
+    """Upload recordings during a test session (per-module)."""
+    u = cur_user()
+    sess = db.get_session(sid)
+    if not sess or sess['user_id'] != u['id']: abort(403)
+    dest = os.path.join(RECORDINGS_DIR, 'session_' + str(sid))
+    os.makedirs(dest, exist_ok=True)
+    saved = []
+    for key, f in request.files.items():
+        if not key.startswith('rec_'): continue
+        qid = key[4:]
+        safe_qid = re.sub(r'[^a-zA-Z0-9.\-]', '_', qid)
+        ext = 'ogg'
+        if f.content_type and 'webm' in f.content_type: ext = 'webm'
+        elif f.content_type and 'mp4' in f.content_type: ext = 'mp4'
+        filepath = os.path.join(dest, f'{safe_qid}.{ext}')
+        f.save(filepath)
+        saved.append(qid)
+    return jsonify({'ok': True, 'saved': saved})
+
+@app.route('/api/session/<int:sid>/finalize-recordings/<int:result_id>', methods=['POST'])
+@require_login
+def api_session_finalize_recordings(sid, result_id):
+    """Move session recordings to permanent result storage."""
+    u = cur_user()
+    sess = db.get_session(sid)
+    if not sess or sess['user_id'] != u['id']: abort(403)
+    r = db.get_result_by_id(result_id)
+    if not r or r['user_id'] != u['id']: abort(403)
+    sess_dir = os.path.join(RECORDINGS_DIR, 'session_' + str(sid))
+    result_dir = os.path.join(RECORDINGS_DIR, str(result_id))
+    if os.path.isdir(sess_dir):
+        os.makedirs(result_dir, exist_ok=True)
+        for fname in os.listdir(sess_dir):
+            src = os.path.join(sess_dir, fname)
+            dst = os.path.join(result_dir, fname)
+            shutil.move(src, dst)
+        shutil.rmtree(sess_dir, ignore_errors=True)
+    return jsonify({'ok': True})
 
 @app.route('/test/<test_id>')
 def take_test(test_id):
@@ -327,6 +560,69 @@ def serve_audio(filepath):
     fp = safe_path(TESTS_DIR, filepath)
     if not fp or not os.path.exists(fp): abort(404)
     return send_from_directory(os.path.dirname(fp), os.path.basename(fp), mimetype='audio/ogg')
+
+# ===== Recording upload and playback =====
+
+RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'recordings')
+
+@app.route('/api/upload-recording/<int:result_id>', methods=['POST'])
+@require_login
+def api_upload_recording(result_id):
+    """Upload audio recording files for a result."""
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if r['user_id'] != u['id']: abort(403)
+    dest = os.path.join(RECORDINGS_DIR, str(result_id))
+    os.makedirs(dest, exist_ok=True)
+    saved = []
+    for key, f in request.files.items():
+        if not key.startswith('rec_'): continue
+        qid = key[4:]  # strip 'rec_' prefix
+        # Sanitize qid: only allow alphanumeric, dots, dashes
+        safe_qid = re.sub(r'[^a-zA-Z0-9.\-]', '_', qid)
+        ext = 'ogg'
+        if f.content_type and 'webm' in f.content_type: ext = 'webm'
+        elif f.content_type and 'mp4' in f.content_type: ext = 'mp4'
+        filepath = os.path.join(dest, f'{safe_qid}.{ext}')
+        f.save(filepath)
+        saved.append(qid)
+    return jsonify({'ok': True, 'saved': saved})
+
+@app.route('/recordings/<int:result_id>/<qid>')
+@require_login
+def serve_recording(result_id, qid):
+    """Serve a recording file. Teachers/admins and the student can access."""
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    safe_qid = re.sub(r'[^a-zA-Z0-9.\-]', '_', qid)
+    dest = os.path.join(RECORDINGS_DIR, str(result_id))
+    if not os.path.isdir(dest): abort(404)
+    # Find the file regardless of extension
+    for ext in ('ogg', 'webm', 'mp4'):
+        fp = os.path.join(dest, f'{safe_qid}.{ext}')
+        if os.path.exists(fp):
+            mime = {'ogg': 'audio/ogg', 'webm': 'audio/webm', 'mp4': 'audio/mp4'}.get(ext, 'audio/ogg')
+            return send_from_directory(dest, f'{safe_qid}.{ext}', mimetype=mime)
+    abort(404)
+
+@app.route('/api/recordings/<int:result_id>')
+@require_login
+def api_list_recordings(result_id):
+    """List available recording qids for a result."""
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    dest = os.path.join(RECORDINGS_DIR, str(result_id))
+    if not os.path.isdir(dest): return jsonify([])
+    qids = []
+    for fname in os.listdir(dest):
+        name, _ = os.path.splitext(fname)
+        qids.append(name)
+    return jsonify(qids)
 
 # ===== Admin =====
 
@@ -527,6 +823,78 @@ def result_detail(result_id):
     # Students can only view their own; teachers/admins can view all
     if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
     return render_template('result_detail.html', result=r, user=u)
+
+# ===== Review Mode =====
+
+@app.route('/review/<int:result_id>')
+@require_login
+def review_test(result_id):
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    tests = _cached_scan()
+    test_info = tests.get(r['test_id'])
+    if not test_info: abort(404)
+    return render_template('review.html', result=r, test_info=test_info, user=u)
+
+@app.route('/api/review-data/<int:result_id>')
+@require_login
+def api_review_data(result_id):
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    tests = _cached_scan()
+    test_info = tests.get(r['test_id'])
+    if not test_info: return jsonify({'error': 'test not found'}), 404
+    # Parse graded results
+    try:
+        sections = json.loads(r['sections_json']) if r['sections_json'] else []
+    except Exception: sections = []
+    detail_map = {}
+    for sec in sections:
+        for d in sec.get('details', []):
+            detail_map[str(d.get('qid', ''))] = d
+    # Load full test modules with HTML
+    modules = []
+    for mod_info in test_info['modules']:
+        fp = safe_path(TESTS_DIR, mod_info['filename'])
+        if not fp or not os.path.exists(fp): continue
+        parsed = _cached_parse(fp)
+        mi = mod_info['module_index']
+        if mi >= len(parsed['modules']): continue
+        mod = parsed['modules'][mi]
+        pages = pages_to_html(build_question_list(mod))
+        for p in pages:
+            qid = str(p.get('question_id', ''))
+            p['graded'] = detail_map.get(qid, {})
+            if p.get('question_type') == 'cloze':
+                p['cloze_details'] = [detail_map.get(f'{qid}.{i+1}', {}) for i in range(len(p.get('cloze_fills', [])))]
+        modules.append({'section': mod['section'], 'module': mod['module'], 'pages': pages})
+    # Load notes, comments, explanations, recordings
+    notes = db.get_notes(u['id'], result_id)
+    comments = db.get_teacher_comments(result_id)
+    db_expl = db.get_explanations(r['test_id'])
+    md_expl = {}
+    seen = set()
+    for mi in test_info['modules']:
+        fn = mi['filename']
+        if fn in seen: continue
+        seen.add(fn)
+        fp = safe_path(TESTS_DIR, fn)
+        if fp and os.path.exists(fp):
+            parsed = _cached_parse(fp)
+            for mod in parsed['modules']:
+                for pg in build_question_list(mod):
+                    qid = str(pg.get('question_id', ''))
+                    if pg.get('explanation'):
+                        md_expl[qid] = md_html(pg['explanation'])
+    explanations = {**md_expl, **db_expl}
+    rec_dir = os.path.join(RECORDINGS_DIR, str(result_id))
+    recs = [os.path.splitext(f)[0] for f in os.listdir(rec_dir)] if os.path.isdir(rec_dir) else []
+    return jsonify({'modules': modules, 'notes': notes, 'comments': comments,
+        'explanations': explanations, 'recordings': recs, 'result_id': result_id})
 
 # ===== History =====
 
