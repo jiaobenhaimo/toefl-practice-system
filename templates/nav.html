@@ -20,27 +20,27 @@
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Test Library
         </a>
-        {% if user %}
+        {% if user and user.role in ("admin","teacher") %}
         <a href="/dashboard" class="sidebar__link" aria-label="Analytics">
             <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="10" width="3" height="7" rx="1" fill="currentColor" opacity="0.4"/><rect x="8.5" y="6" width="3" height="11" rx="1" fill="currentColor" opacity="0.6"/><rect x="14" y="3" width="3" height="14" rx="1" fill="currentColor" opacity="0.8"/></svg>
-            Dashboard
+            Analytics
         </a>
         {% endif %}
         {% if user and user.role == 'student' %}
         <a href="/history" class="sidebar__link" aria-label="Result History">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            History
+            Result History
         </a>
         {% endif %}
         {% if user and user.role in ('admin','teacher') %}
         <div class="sidebar__divider"></div>
         <a href="/teacher/results" class="sidebar__link" aria-label="Submissions">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 15l4-6 3 3 4-5 3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Results
+            Submissions
         </a>
         <a href="/teacher/progress" class="sidebar__link" aria-label="Student Progress">
             <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="12" width="3" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="8.5" y="8" width="3" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="14" y="4" width="3" height="13" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-            Progress
+            Progress Tracking
         </a>
         {% endif %}
         {% if user and user.role == 'admin' %}
@@ -59,7 +59,7 @@
                 <span id="lang-label-nav"></span>
             </button>
         </div>
-        {% if user %}
+        {% if user and user.role in ("admin","teacher") %}
         <div class="sidebar__user">
             <span class="sidebar__user-name">{{ user.display_name }}</span>
             {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>{% endif %}

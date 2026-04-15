@@ -204,9 +204,11 @@ def create_user(username, password, role, display_name=''):
     return uid
 
 
-def update_user(user_id, display_name=None, password=None, role=None):
+def update_user(user_id, display_name=None, password=None, role=None, username=None):
     """Update user fields."""
     conn = get_db()
+    if username is not None:
+        conn.execute("UPDATE users SET username=? WHERE id=?", (username, user_id))
     if display_name is not None:
         conn.execute("UPDATE users SET display_name=? WHERE id=?", (display_name, user_id))
     if password:

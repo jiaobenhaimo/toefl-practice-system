@@ -649,12 +649,11 @@ def admin_users():
 @require_role('admin')
 def admin_create_user():
     un = request.form.get('username','').strip()
-    pw = request.form.get('password','')
-    if not un or not pw: flash('Username and password required'); return redirect('/admin/users')
-    if len(pw) < 6: flash('Password must be at least 6 characters'); return redirect('/admin/users')
+    pw = '12345678'  # Fixed default password
+    if not un: flash('Username is required'); return redirect('/admin/users')
     try:
         db.create_user(un, pw, request.form.get('role','student'), request.form.get('display_name','').strip())
-        flash(f'User "{un}" created')
+        flash(f'User "{un}" created (password: 12345678)')
     except Exception as e: flash(f'Error: {e}')
     return redirect('/admin/users')
 
@@ -670,16 +669,23 @@ def admin_delete_user(uid):
 @require_login
 @require_role('admin')
 def admin_edit_user(uid):
-    pw = request.form.get('password','').strip()
+    new_username = request.form.get('username','').strip()
+    new_display = request.form.get('display_name','').strip()
     new_role = request.form.get('role')
-    # Prevent admin from changing their own role (could lock out the last admin)
+    reset_pw = request.form.get('reset_password') == 'on'
+    # Prevent admin from changing their own role
     if uid == session.get('user_id') and new_role and new_role != 'admin':
         flash('Cannot change your own role'); return redirect('/admin/users')
-    if pw and len(pw) < 6:
-        flash('Password must be at least 6 characters'); return redirect('/admin/users')
-    db.update_user(uid, display_name=request.form.get('display_name'),
-        password=pw or None, role=new_role)
-    flash('User updated'); return redirect('/admin/users')
+    # Only allow student <-> teacher, not admin
+    if new_role == 'admin':
+        flash('Cannot assign admin role'); return redirect('/admin/users')
+    db.update_user(uid, display_name=new_display or None,
+        username=new_username or None,
+        password='12345678' if reset_pw else None,
+        role=new_role)
+    msg = 'User updated'
+    if reset_pw: msg += ' (password reset to 12345678)'
+    flash(msg); return redirect('/admin/users')
 
 @app.route('/admin/users/import', methods=['POST'])
 @require_login
@@ -824,17 +830,12 @@ def account():
         return redirect('/account')
     return render_template('account.html', user=u)
 
-# ===== Results Detail =====
+# ===== Results Detail (redirect to review) =====
 
 @app.route('/results/<int:result_id>')
 @require_login
 def result_detail(result_id):
-    u = cur_user()
-    r = db.get_result_by_id(result_id)
-    if not r: abort(404)
-    # Students can only view their own; teachers/admins can view all
-    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
-    return render_template('result_detail.html', result=r, user=u)
+    return redirect(f'/review/{result_id}')
 
 # ===== Review Mode =====
 
@@ -848,7 +849,11 @@ def review_test(result_id):
     tests = _cached_scan()
     test_info = tests.get(r['test_id'])
     if not test_info: abort(404)
-    return render_template('review.html', result=r, test_info=test_info, user=u)
+    # Check if current user is the assigning teacher
+    assignments = db.get_assignments(student_id=r['user_id'])
+    is_assigning_teacher = any(a['teacher_id'] == u['id'] and a['test_id'] == r['test_id'] for a in assignments)
+    return render_template('review.html', result=r, test_info=test_info, user=u,
+        is_assigning_teacher=is_assigning_teacher)
 
 @app.route('/api/review-data/<int:result_id>')
 @require_login
@@ -911,6 +916,13 @@ def api_review_data(result_id):
     explanations = {**md_expl, **db_expl}
     rec_dir = os.path.join(RECORDINGS_DIR, str(result_id))
     recs = [os.path.splitext(f)[0] for f in os.listdir(rec_dir)] if os.path.isdir(rec_dir) else []
+    # Extract rubric scores from comments
+    rubric_scores = {}
+    for key, val in comments.items():
+        if key.startswith('_rubric_'):
+            qid = key[8:]
+            try: rubric_scores[qid] = int(val['comment'])
+            except: pass
     # Build section summaries for the overview
     section_summaries = []
     for sec in sections:
@@ -923,9 +935,161 @@ def api_review_data(result_id):
         })
     return jsonify({'modules': modules, 'notes': notes, 'comments': comments,
         'explanations': explanations, 'recordings': recs, 'result_id': result_id,
-        'section_summaries': section_summaries})
+        'section_summaries': section_summaries,
+        'student_name': r.get('display_name') or r.get('username') or '',
+        'assigning_teacher_ids': [a['teacher_id'] for a in db.get_assignments(student_id=r['user_id']) if a['test_id'] == r['test_id']],
+    })
 
-# ===== History =====
+# ===== Rubric Scoring (Speaking/Writing) =====
+
+@app.route('/api/rubric-score/<int:result_id>', methods=['POST'])
+@require_login
+def api_save_rubric_score(result_id):
+    """Save a rubric score for a speaking/writing question."""
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    # Only assigning teacher or admin can score
+    if u['role'] == 'student': abort(403)
+    if u['role'] == 'teacher':
+        assignments = db.get_assignments(student_id=r['user_id'])
+        if not any(a['teacher_id'] == u['id'] and a['test_id'] == r['test_id'] for a in assignments):
+            abort(403)
+    data = request.get_json()
+    if not data: abort(400)
+    qid = data.get('question_id', '')
+    score = data.get('score')
+    if score is None or not isinstance(score, (int, float)) or score < 0 or score > 5:
+        return jsonify({'ok': False, 'error': 'Score must be 0-5'}), 400
+    # Store as a special comment with _rubric_ prefix
+    db.save_teacher_comment(u['id'], result_id, f'_rubric_{qid}', str(int(score)))
+    return jsonify({'ok': True})
+
+# TOEFL 2026 scoring — official lookup tables from ETS scoring guide
+# Speaking: sum rubric points (0-5 per item, 11 items, max 55) → band
+# Writing: build_sentence correct (1pt each) + email rubric (0-5) + discussion rubric (0-5), max ~20 → band
+# Reading/Listening: percentage correct → estimated 0-30 → band
+
+# Speaking: total rubric points (0-55) → section band
+_SPEAKING_BAND_TABLE = [
+    (52, 55, 6.0), (47, 51, 5.5), (42, 46, 5.0), (37, 41, 4.5),
+    (32, 36, 4.0), (27, 31, 3.5), (22, 26, 3.0), (17, 21, 2.5),
+    (12, 16, 2.0), (7, 11, 1.5), (0, 6, 1.0),
+]
+
+# Writing: total raw points (0-20) → section band
+_WRITING_BAND_TABLE = [
+    (19, 20, 6.0), (17, 18, 5.5), (15, 16, 5.0), (13, 14, 4.5),
+    (11, 12, 4.0), (9, 10, 3.5), (7, 8, 3.0), (5, 6, 2.5),
+    (3, 4, 2.0), (2, 2, 1.5), (0, 1, 1.0),
+]
+
+# Reading/Listening: estimated 0-30 score → section band
+_RL_BAND_TABLE = [
+    (29, 30, 6.0), (27, 28, 5.5), (24, 26, 5.0), (22, 23, 4.5),
+    (18, 21, 4.0), (12, 17, 3.5), (6, 11, 3.0), (4, 5, 2.5),
+    (3, 3, 2.0), (2, 2, 1.5), (0, 1, 1.0),
+]
+
+def _lookup_band(table, raw):
+    """Look up band from a table of (min, max, band) tuples."""
+    raw = max(0, round(raw))
+    for lo, hi, band in table:
+        if lo <= raw <= hi:
+            return band
+    return 1.0
+
+def _section_band(section, details, rubric_map):
+    """Calculate TOEFL 2026 1-6 band for a section from question details and rubric scores.
+    
+    Reading/Listening: percentage correct → 0-30 estimate → band
+    Writing: build_sentence correct (1pt) + email/discussion rubric (0-5) → raw sum → scaled to 20 → band
+    Speaking: all rubric scores summed → scaled to 55 → band
+    """
+    if section in ('reading', 'listening'):
+        correct = sum(1 for d in details if d.get('correct') is True)
+        total = sum(1 for d in details if d.get('correct') is not None)
+        if total == 0:
+            return None
+        score_30 = correct / total * 30
+        return _lookup_band(_RL_BAND_TABLE, score_30)
+
+    elif section == 'writing':
+        raw = 0
+        max_raw = 0
+        # Auto-graded tasks (build_sentence): 1 point each
+        for d in details:
+            dt = d.get('type', '')
+            if dt in ('build_sentence', 'mc', 'cloze') and d.get('correct') is not None:
+                max_raw += 1
+                if d.get('correct'):
+                    raw += 1
+        # Rubric-scored tasks (email, discussion): 0-5 each
+        for d in details:
+            dt = d.get('type', '')
+            qid = str(d.get('qid', ''))
+            if dt in ('email', 'discussion'):
+                max_raw += 5
+                if qid in rubric_map:
+                    raw += rubric_map[qid]
+        if max_raw == 0:
+            return None
+        # Scale to 20-point range and look up
+        scaled = raw / max_raw * 20
+        return _lookup_band(_WRITING_BAND_TABLE, scaled)
+
+    elif section == 'speaking':
+        raw = 0
+        max_raw = 0
+        for d in details:
+            dt = d.get('type', '')
+            qid = str(d.get('qid', ''))
+            if dt in ('listen_repeat', 'interview'):
+                max_raw += 5
+                if qid in rubric_map:
+                    raw += rubric_map[qid]
+        if max_raw == 0:
+            return None
+        # Scale to 55-point range and look up
+        scaled = raw / max_raw * 55
+        return _lookup_band(_SPEAKING_BAND_TABLE, scaled)
+
+    return None
+
+@app.route('/api/toefl-scores/<int:result_id>')
+@require_login
+def api_toefl_scores(result_id):
+    """Calculate TOEFL 2026 1-6 band scores per section."""
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' and r['user_id'] != u['id']: abort(403)
+    try:
+        sections = json.loads(r['sections_json']) if r['sections_json'] else []
+    except Exception: sections = []
+    comments = db.get_teacher_comments(result_id)
+    rubric_map = {}
+    for key, val in comments.items():
+        if key.startswith('_rubric_'):
+            qid = key[8:]
+            try: rubric_map[qid] = int(val['comment'])
+            except: pass
+    section_bands = {}
+    for sec in sections:
+        s = sec.get('section', '')
+        band = _section_band(s, sec.get('details', []), rubric_map)
+        if band is not None:
+            section_bands.setdefault(s, []).append(band)
+    result_bands = {}
+    for s, bands in section_bands.items():
+        result_bands[s] = round(sum(bands) / len(bands) * 2) / 2
+    if result_bands:
+        overall = round(sum(result_bands.values()) / len(result_bands) * 2) / 2
+    else:
+        overall = None
+    return jsonify({'section_bands': result_bands, 'overall': overall, 'rubric_scores': rubric_map})
+
+# ===== History (merged with Analytics for students) =====
 
 @app.route('/history')
 @require_login
@@ -936,11 +1100,30 @@ def history_page():
     total = db.count_results(user_id=u['id'])
     results = db.get_results(user_id=u['id'], limit=per_page, offset=(page-1)*per_page)
     total_pages = max(1, (total + per_page - 1) // per_page)
-    # Build set of assigned test_ids for labeling
     my_assignments = db.get_assignments(student_id=u['id'])
     assigned_test_ids = set(a['test_id'] for a in my_assignments)
     return render_template('history.html', results=results, user=u,
-        page=page, total_pages=total_pages, assigned_test_ids=assigned_test_ids)
+        page=page, total_pages=total_pages, assigned_test_ids=assigned_test_ids,
+        view_user=u, show_analytics=True)
+
+@app.route('/teacher/student/<int:uid>')
+@require_login
+@require_role('admin', 'teacher')
+def teacher_student_view(uid):
+    """View a student's history and analytics (same layout the student sees)."""
+    u = cur_user()
+    student = db.get_user(uid)
+    if not student: abort(404)
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    total = db.count_results(user_id=uid)
+    results = db.get_results(user_id=uid, limit=per_page, offset=(page-1)*per_page)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    assignments = db.get_assignments(student_id=uid)
+    assigned_test_ids = set(a['test_id'] for a in assignments)
+    return render_template('history.html', results=results, user=u,
+        page=page, total_pages=total_pages, assigned_test_ids=assigned_test_ids,
+        view_user=student, show_analytics=True)
 
 # ===== Notes API =====
 
@@ -965,15 +1148,14 @@ def api_save_note(result_id):
     db.save_note(u['id'], result_id, data.get('question_id', ''), data.get('note', ''))
     return jsonify({'ok': True})
 
-# ===== Dashboard Analytics =====
+# ===== Analytics =====
 
 @app.route('/dashboard')
 @require_login
 def dashboard():
     u = cur_user()
     if u['role'] == 'student':
-        return render_template('dashboard.html', user=u, students=None)
-    # Teachers/admins see student list
+        return redirect('/history')  # Merged into History for students
     students = db.list_users(role='student')
     return render_template('dashboard.html', user=u, students=students)
 
@@ -981,17 +1163,27 @@ def dashboard():
 @require_login
 def api_analytics(uid):
     u = cur_user()
-    # Students can only view their own; teachers/admins can view any
     if u['role'] == 'student' and u['id'] != uid: abort(403)
     results = db.get_analytics(uid)
-    # Build analytics data
     score_history = []
     section_totals = {}
     section_correct = {}
     for r in results:
         if r['total_questions'] > 0:
             pct = round(r['total_correct'] / r['total_questions'] * 100)
-            score_history.append({'date': r['date'][:10], 'pct': pct, 'name': r['test_name'] or r['test_id']})
+            # Calculate band from auto-graded sections
+            try:
+                secs = json.loads(r['sections_json']) if r['sections_json'] else []
+            except Exception: secs = []
+            bands = []
+            for sec in secs:
+                s = sec.get('section', '')
+                sc = sec.get('score', {})
+                if s in ('reading', 'listening') and sc.get('total', 0) > 0:
+                    band = _lookup_band(_RL_BAND_TABLE, sc.get('correct', 0) / sc.get('total', 1) * 30)
+                    bands.append(band)
+            avg_band = round(sum(bands) / len(bands) * 2) / 2 if bands else None
+            score_history.append({'date': r['date'][:10], 'pct': pct, 'band': avg_band, 'name': r['test_name'] or r['test_id']})
         try:
             sections = json.loads(r['sections_json']) if r['sections_json'] else []
         except Exception: sections = []
@@ -1000,11 +1192,14 @@ def api_analytics(uid):
             sc = sec.get('score', {})
             section_totals[s] = section_totals.get(s, 0) + sc.get('total', 0)
             section_correct[s] = section_correct.get(s, 0) + sc.get('correct', 0)
+    # Always show all 4 sections
     section_breakdown = []
     for s in ['reading', 'listening', 'writing', 'speaking']:
         t = section_totals.get(s, 0)
         c = section_correct.get(s, 0)
-        section_breakdown.append({'section': s, 'correct': c, 'total': t, 'pct': round(c/t*100) if t > 0 else 0})
+        pct = round(c/t*100) if t > 0 else 0
+        band = _lookup_band(_RL_BAND_TABLE, c / t * 30) if t > 0 else None
+        section_breakdown.append({'section': s, 'correct': c, 'total': t, 'pct': pct, 'band': band})
     return jsonify({'score_history': score_history, 'section_breakdown': section_breakdown})
 
 # ===== Teacher Comments =====

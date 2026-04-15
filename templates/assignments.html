@@ -4,7 +4,7 @@
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
-    <main class="layout__main" style="display:flex;flex-direction:column">
+    <main class="layout__main">
         <h2 class="page-heading">Assignments</h2>
 
         {% if not assignments %}
@@ -38,7 +38,8 @@
                 <div class="assignment-card__meta">
                     Assigned {{ a.assigned_at|fmtdate }}
                     {% if a.due_date %}
-                    <span style="margin-left:8px;color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})">Due {{ a.due_date|fmtdate }}</span>
+                    <br>
+                    <span style="color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})">Due {{ a.due_date|fmtdate }}</span>
                     {% endif %}
                 </div>
             </a>
@@ -46,10 +47,6 @@
             {% endfor %}
         </div>
         {% endif %}
-
-        <div style="margin-top:auto;padding-top:32px;padding-bottom:16px">
-            <a href="/catalog" class="btn btn--secondary">View Test Library</a>
-        </div>
     </main>
 </div>
 {% endblock %}

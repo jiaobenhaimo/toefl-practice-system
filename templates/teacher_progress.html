@@ -16,7 +16,7 @@
             {% for p in progress %}
             <div class="progress-row" style="flex-wrap:wrap">
                 <div class="progress-row__info">
-                    <strong>{{ p.student.display_name }}</strong>
+                    <a href="/teacher/student/{{ p.student.id }}" style="text-decoration:none;color:inherit"><strong>{{ p.student.display_name }}</strong></a>
                     <span style="color:var(--text-dim)">@{{ p.student.username }}</span>
                 </div>
                 <div class="progress-row__bar-wrap">

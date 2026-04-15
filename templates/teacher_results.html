@@ -43,22 +43,6 @@
         </div>
         {% endif %}
 
-        {% if students %}
-        <div class="card" style="margin-bottom:16px">
-            <h3 class="card__title">Export Results</h3>
-            <form method="POST" action="/teacher/export" class="form-row" style="align-items:center">
-                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                <select name="student_ids" multiple required class="login-input" style="flex:1;height:auto;min-height:44px;padding:8px 14px" title="Hold Ctrl/Cmd to select multiple">
-                    {% for s in students %}
-                    <option value="{{ s.id }}">{{ s.display_name }}</option>
-                    {% endfor %}
-                </select>
-                <input type="hidden" name="format" value="csv">
-                <button type="submit" class="btn btn--secondary">Export CSV</button>
-            </form>
-        </div>
-        {% endif %}
-
         <div class="card">
             <h3 class="card__title">All Submissions</h3>
             {% if results %}

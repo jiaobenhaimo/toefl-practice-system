@@ -573,6 +573,9 @@ select.login-input { padding-right: 32px; background-image: url("data:image/svg+
 .review-cloze-inline--wrong s + * { color: var(--green); }
 
 /* ===== USER TABLE ===== */
+.analytics-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+.analytics-card { padding: 14px 16px; }
+@media (max-width: 900px) { .analytics-row { grid-template-columns: 1fr; } }
 .user-table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
 .user-table th { text-align: left; font-weight: 600; color: var(--text-dim); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
 .user-table th:hover { color: var(--text); }

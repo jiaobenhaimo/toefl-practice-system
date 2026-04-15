@@ -10,7 +10,7 @@
     <div id="review-main" class="screen">
         <header class="test-header" role="banner">
             <div class="test-header__left">
-                <a href="/results/{{ result.id }}" class="btn btn--icon" title="Back to results" aria-label="Back to results">
+                <a href="/history" class="btn btn--icon" title="Back to history" aria-label="Back to history">
                     <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4L7 10l6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
                 </a>
                 <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-test">
@@ -245,7 +245,7 @@ function renderPage() {
 
 function rvNext() {
     if (_pageIdx < _allPages.length - 1) { _pageIdx++; renderPage(); }
-    else { window.location.href = '/results/' + RESULT_ID; }
+    else { window.location.href = '/history'; }
 }
 function rvPrev() { if (_pageIdx > 0) { _pageIdx--; renderPage(); } }
 

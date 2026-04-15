@@ -1,19 +1,89 @@
 {% extends "base.html" %}
-{% block title %}Result History — {{ site.name }}{% endblock %}
+{% block title %}{% if view_user and view_user.id != user.id %}{{ view_user.display_name }} — {% endif %}Result History — {{ site.name }}{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+{% endblock %}
 
 {% block body %}
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
+        {% if view_user and view_user.id != user.id %}
+        <a href="/teacher/progress" class="back-link">&larr; Back to Progress Tracking</a>
+        <h2 class="page-heading">{{ view_user.display_name }}</h2>
+        {% else %}
         <h2 class="page-heading">Result History</h2>
+        {% endif %}
+
+        {% if show_analytics %}
+        <!-- Analytics Section -->
+        <div id="analytics-row" class="analytics-row">
+            <div class="card analytics-card">
+                <h3 class="card__title">Score Trend</h3>
+                <div style="height:160px"><canvas id="chart-trend"></canvas></div>
+            </div>
+            <div class="card analytics-card">
+                <h3 class="card__title">Performance by Section</h3>
+                <div style="height:160px"><canvas id="chart-sections"></canvas></div>
+            </div>
+            <div class="card analytics-card">
+                <h3 class="card__title">Areas for Improvement</h3>
+                <div id="improvement-list" style="font-size:0.88rem;color:var(--text-muted);padding:8px 0">Loading…</div>
+            </div>
+        </div>
+        <script>
+        (function() {
+            var uid = {{ view_user.id }};
+            fetch('/api/analytics/' + uid).then(r => r.json()).then(function(data) {
+                var isDark = document.documentElement.getAttribute('data-theme') === 'dark' || (!document.documentElement.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                var gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+                var textColor = isDark ? '#98989d' : '#8e8e93';
+                Chart.defaults.color = textColor;
+                // Score Trend — show band score if available, else percentage
+                var labels = data.score_history.map(function(h) { return h.date; });
+                var values = data.score_history.map(function(h) { return h.band || (h.pct / 100 * 6).toFixed(1); });
+                new Chart(document.getElementById('chart-trend'), {
+                    type: 'line',
+                    data: { labels: labels, datasets: [{ data: values, borderColor: '#007aff', backgroundColor: 'rgba(0,122,255,0.08)', tension: 0.3, fill: true, pointRadius: 3 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                        scales: { y: { min: 0, max: 6, ticks: { stepSize: 1 }, grid: { color: gridColor } }, x: { display: false } } }
+                });
+                // Section Breakdown — all 4 sections
+                var secLabels = data.section_breakdown.map(function(s) { return s.section.charAt(0).toUpperCase() + s.section.slice(1); });
+                var secColors = ['#007aff', '#af52de', '#ff9500', '#34c759'];
+                var secValues = data.section_breakdown.map(function(s) { return s.band || (s.total > 0 ? (s.pct / 100 * 6).toFixed(1) : 0); });
+                new Chart(document.getElementById('chart-sections'), {
+                    type: 'bar',
+                    data: { labels: secLabels, datasets: [{ data: secValues, backgroundColor: secColors, borderRadius: 6, maxBarThickness: 32 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                        scales: { y: { min: 0, max: 6, ticks: { stepSize: 1 }, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+                });
+                // Areas for Improvement — show all 4, sorted weakest first
+                var sorted = data.section_breakdown.slice().sort(function(a, b) { return (a.band || 0) - (b.band || 0); });
+                var html = '';
+                sorted.forEach(function(s) {
+                    var label = s.section.charAt(0).toUpperCase() + s.section.slice(1);
+                    var band = s.band ? s.band.toFixed(1) : '—';
+                    var color = s.total > 0 ? (s.band >= 5 ? 'var(--green)' : s.band >= 4 ? 'var(--amber)' : 'var(--red)') : 'var(--text-dim)';
+                    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">';
+                    html += '<span style="color:var(--' + s.section + ')">' + label + '</span>';
+                    html += '<span style="font-weight:600;color:' + color + '">' + (s.total > 0 ? 'Band ' + band : 'Not taken') + '</span>';
+                    html += '</div>';
+                });
+                document.getElementById('improvement-list').innerHTML = html;
+            });
+        })();
+        </script>
+        {% endif %}
 
         {% if not results %}
-        <div class="catalog-empty">
+        <div class="catalog-empty" style="margin-top:24px">
             <p>No results yet.</p>
             <p class="catalog-empty__hint">Complete a test and your results will appear here.</p>
         </div>
         {% else %}
-        <div class="card">
+        <div class="card" style="margin-top:16px">
             <table class="user-table">
                 <thead>
                     <tr>
@@ -43,7 +113,7 @@
                         </td>
                         <td style="color:var(--text-dim)">{{ r.date|fmtdate }}</td>
                         <td class="user-table__actions" onclick="event.stopPropagation()">
-                            <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF">
+                            <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF" onclick="return confirmPdfExport(event, this.href)">
                                 <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
                             </a>
                         </td>
@@ -62,4 +132,41 @@
         {% endif %}
     </main>
 </div>
+
+<!-- PDF Export Confirmation Modal (item 7) -->
+<div class="test-modal-overlay" id="pdf-confirm-overlay" onclick="if(event.target===this)closePdfModal()">
+    <div class="test-modal" role="dialog">
+        <button class="test-modal__close" onclick="closePdfModal()" aria-label="Close"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <h3 class="test-modal__title">Export PDF</h3>
+        <p style="margin:16px 0;font-size:0.95rem;color:var(--text-muted)">Download a PDF report of this test result?</p>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn--secondary" onclick="closePdfModal()">Cancel</button>
+            <button class="btn btn--primary" id="pdf-confirm-btn" autofocus>Download</button>
+        </div>
+    </div>
+</div>
+<script>
+var _pdfUrl = '';
+function confirmPdfExport(e, url) {
+    e.preventDefault();
+    _pdfUrl = url;
+    document.getElementById('pdf-confirm-overlay').classList.add('test-modal-overlay--active');
+    document.getElementById('pdf-confirm-btn').focus();
+    return false;
+}
+function closePdfModal() {
+    document.getElementById('pdf-confirm-overlay').classList.remove('test-modal-overlay--active');
+}
+document.getElementById('pdf-confirm-btn').onclick = function() {
+    closePdfModal();
+    window.location.href = _pdfUrl;
+};
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closePdfModal();
+    if (e.key === 'Enter' && document.getElementById('pdf-confirm-overlay').classList.contains('test-modal-overlay--active')) {
+        closePdfModal();
+        if (_pdfUrl) window.location.href = _pdfUrl;
+    }
+});
+</script>
 {% endblock %}
