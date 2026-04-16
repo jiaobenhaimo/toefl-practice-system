@@ -10,7 +10,7 @@
     <div id="review-main" class="screen">
         <header class="test-header" role="banner">
             <div class="test-header__left">
-                <a href="/history" class="btn btn--icon" title="Back to history" aria-label="Back to history">
+                <a href="{% if user.role in ('admin','teacher') %}/teacher/results{% elif user.role == 'parent' %}/parent{% else %}/history{% endif %}" class="btn btn--icon" title="Back" aria-label="Back">
                     <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4L7 10l6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
                 </a>
                 <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-test">
@@ -46,6 +46,7 @@
 <script>
 var RESULT_ID = {{ result.id }};
 var USER_ROLE = {{ user.role|tojson }};
+var BACK_URL = {% if user.role in ('admin','teacher') %}'/teacher/results'{% elif user.role == 'parent' %}'/parent'{% else %}'/history'{% endif %};
 var _data = null;
 var _allPages = [];
 var _pageIdx = 0;
@@ -239,13 +240,13 @@ function renderPage() {
 
     // Nav
     document.getElementById('rv-prev').style.display = _pageIdx > 0 ? '' : 'none';
-    document.getElementById('rv-next').textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Back to Results';
+    document.getElementById('rv-next').textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Done';
     updateDots();
 }
 
 function rvNext() {
     if (_pageIdx < _allPages.length - 1) { _pageIdx++; renderPage(); }
-    else { window.location.href = '/history'; }
+    else { window.location.href = BACK_URL; }
 }
 function rvPrev() { if (_pageIdx > 0) { _pageIdx--; renderPage(); } }
 

@@ -12,13 +12,14 @@
         <h2 class="page-heading">Analytics</h2>
 
         {% if students %}
-        <div class="form-row" style="margin-bottom:20px">
+        <div class="form-row" style="margin-bottom:20px;align-items:center">
             <select id="student-select" class="login-input" style="flex:1;max-width:320px" onchange="loadAnalytics()" aria-label="Select a student">
                 <option value="">Select a student...</option>
                 {% for s in students %}
                 <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
                 {% endfor %}
             </select>
+            <a id="student-history-link" href="#" class="btn btn--secondary" style="display:none">View full history →</a>
         </div>
         {% endif %}
 
@@ -69,7 +70,17 @@ function chartScaleOpts() {
 
 function loadAnalytics() {
     var uid = _isStudent ? _uid : document.getElementById('student-select').value;
-    if (!uid) { document.getElementById('dashboard-content').style.display = 'none'; document.getElementById('dashboard-empty').style.display = ''; return; }
+    var histLink = document.getElementById('student-history-link');
+    if (!uid) {
+        document.getElementById('dashboard-content').style.display = 'none';
+        document.getElementById('dashboard-empty').style.display = '';
+        if (histLink) histLink.style.display = 'none';
+        return;
+    }
+    if (histLink) {
+        histLink.href = '/teacher/student/' + uid;
+        histLink.style.display = '';
+    }
     fetch('/api/analytics/' + uid).then(function(r){ return r.json(); }).then(function(data) {
         if (!data.score_history || data.score_history.length === 0) {
             document.getElementById('dashboard-content').style.display = 'none';

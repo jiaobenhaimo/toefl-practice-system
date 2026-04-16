@@ -1,316 +1,199 @@
+# 📝 TOEFL Practice System
+
 **[English](README.md)** | **[中文](README.zh.md)**
 
-# Test Practice System
+A self-hosted mock test platform for the **2026 TOEFL iBT** — server-side grading, real-time 1–6 band scoring, and a full teacher dashboard. One command to run, no external database needed.
 
-A web-based mock test platform with server-side grading, server-side test sessions, role-based dashboards, and multi-test-type support. Currently used for TOEFL practice, but the architecture supports any standardized test format.
+> Built by [超能录](https://github.com/jiaobenhaimo) with [Claude](https://claude.ai) (Anthropic) through iterative conversation.
 
-> This project was primarily vibe-coded with [Claude](https://claude.ai) (Anthropic). The architecture, code, and documentation were developed through iterative conversation.
+## 🌟 Highlights
 
----
+- **Seven question types** — multiple choice, cloze, build-a-sentence, email, academic discussion, listen-and-repeat, interview
+- **2026 TOEFL scoring** — official ETS lookup tables (Speaking /55, Writing /20, Reading & Listening /30 → 1.0–6.0 band)
+- **Answers never reach the browser** — server-side grading keeps tests secure
+- **Cross-device resume** — start on your laptop, finish on your phone
+- **Spaced repetition** — wrong answers auto-collect into a review queue with 1→3→7→14 day intervals
+- **Teacher tools** — assign tests, grade rubrics 0–5, leave per-question comments, monitor live sessions, track progress
+- **Parent portal** — read-only view of a child's results, analytics, and teacher feedback
+- **One command to run** — Python + SQLite, nothing else to install
 
-## Deployment
-
-### Prerequisites
-
-- Python 3.9+
-- A modern web browser (Chrome, Firefox, Safari, Edge)
-- HTTPS for microphone access on non-localhost domains
-
-### Quick start
+## ⬇️ Installation
 
 ```bash
-git clone https://github.com/jiaobenhaimo/toefl-practice-system.git && cd toefl-practice-system
-
-python -m venv venv
-source venv/bin/activate        # macOS/Linux
-# venv\Scripts\activate         # Windows
-
+git clone https://github.com/jiaobenhaimo/toefl-practice-system.git
+cd toefl-practice-system
 pip install -r requirements.txt
-python app.py                    # http://localhost:8080
+python app.py
 ```
 
-On first run, the system creates a SQLite database at `data/toefl.db` and default accounts from `config.yaml`:
+Open `http://localhost:8080`. Default login: `admin` / `admin`. **Change this immediately** at `/admin/users`.
 
-| Account | Username | Password | Role |
-|---|---|---|---|
-| Admin | `admin` | `admin` | Full access |
-| Test student | `student` | `student` | Student |
+Python 3.9+ required. Works on macOS, Linux, and Windows. Speaking questions need HTTPS (or localhost) for microphone access.
 
-**Change default passwords immediately** at `/admin/users`.
-
-### Production deployment
+### Production
 
 ```bash
-source venv/bin/activate
 export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 gunicorn -w 4 -b 0.0.0.0:8080 app:app
 ```
 
-Use Nginx or Caddy as a reverse proxy with SSL. Microphone access (for speaking questions) requires HTTPS on all non-localhost domains.
+Put Nginx or Caddy in front with SSL for microphone access.
 
-### Configuration
+## 🚀 Usage
 
-All site-level settings live in `config.yaml`:
+### Students
+
+Log in → see your **Assignments** → take a test → get your **1–6 band score** instantly → review wrong answers with explanations and teacher comments. Wrong answers go into a **Review Queue** with spaced repetition intervals.
+
+### Teachers
+
+**Submissions** — browse every student's results, play back speaking recordings, read writing responses. **Assign tests** — pick a student, a test, an optional section and due date. **Score rubrics** — grade speaking and writing 0–5. **Progress Tracking** — click into any student's full history with analytics charts. **Live monitoring** — see which students are currently taking a test with real-time progress.
+
+### Parents
+
+Read-only view of their child's test history, analytics, band scores, and teacher feedback. Admin links each parent account to a student.
+
+### Admins
+
+Everything teachers can do, plus user management (create students, teachers, and parent accounts; bulk CSV import) and site-wide announcements.
+
+## 📐 Scoring (2026 TOEFL iBT)
+
+Implements the official ETS scoring tables from the January 2026 reform:
+
+| Section | Scoring Method | Band Examples |
+|---|---|---|
+| **Reading / Listening** | % correct → estimated 0–30 | 29–30 → 6.0 · 24–26 → 5.0 · 18–21 → 4.0 |
+| **Writing** | Build-a-sentence (1pt, auto) + Email & Discussion (rubric 0–5) → /20 | 19–20 → 6.0 · 15–16 → 5.0 · 11–12 → 4.0 |
+| **Speaking** | Listen-and-repeat + Interview (rubric 0–5) → /55 | 52–55 → 6.0 · 42–46 → 5.0 · 32–36 → 4.0 |
+| **Overall** | Average of 4 section bands, rounded to nearest 0.5 | |
+
+Practice tests with fewer items are proportionally scaled to the official range before lookup.
+
+## ✍️ Creating Tests
+
+Drop `.md` files into the `tests/` folder:
+
+```markdown
+---
+test_name: "Reading Practice 1"
+test_type: toefl
+---
+# Reading — Module 1 — 18 min
+
+## Passage
+The quick brown fox...
+
+[question]
+What does the passage mainly discuss?
+- A) Foxes
+- B) Speed
+- C) Colors
+- D) Animals
+answer: A
+[/question]
+```
+
+Audio files go in a subfolder matching the test filename (e.g., `tests/listening-1/track01.ogg`). All 7 question types are documented in the example test.
+
+Add `[explanation]...[/explanation]` after any question to provide an answer explanation shown to students after submission. Teachers can also add or override explanations from the review page.
+
+## 🏗️ Architecture
+
+```
+app.py              Flask server — routes, middleware, init
+helpers.py          Shared helpers — caching, auth decorators, TOEFL scoring, config
+database.py         SQLite — 9 tables, thread-local connection pooling
+parser.py           Markdown → structured test data
+static/js/app.js    Test engine — timer, audio, recording, keyboard nav
+static/css/style.css   Apple HIG design system, light + dark mode
+templates/          15 Jinja2 templates
+tests/              Markdown test files + audio
+data/               SQLite DB + recordings (auto-created)
+docs/               User manual
+authoring/          Test format spec + TTS audio generator
+```
+
+**Security** — CSRF on all forms · login rate limiting · session regeneration · answers stripped from API · recording access control · 16 MB upload limit · open redirect prevention.
+
+**Performance** — thread-local DB connections (1 per request, not 1 per function call) · per-request user caching via flask.g · test file parsing cached by mtime · batch SQL for progress tracking · batch error bank updates · audio compressed to 32 kbps mono Opus · exponential backoff on live monitoring polling.
+
+## ⚙️ Configuration
+
+All settings in `config.yaml`:
 
 ```yaml
 site:
-  name: "My Test Platform"       # Shown in sidebar and titles
+  name: "My Test Platform"
 
-default_test_type: toefl          # Fallback test type
-
-test_types:                       # Define as many as needed
-  toefl:
-    label: "TOEFL iBT"
-    sections:
-      reading: { label: Reading, color: "#007aff" }
-      ...
-  ielts:
-    label: "IELTS"
-    sections: ...
-
-default_admin:                    # Created on first run only
+default_admin:
   username: admin
   password: admin
-test_account:                     # Optional test student
-  username: student
-  password: student
 ```
 
-Environment variables override config where applicable:
-
-| Variable | Default | Description |
+| Environment Variable | Default | Purpose |
 |---|---|---|
-| `TOEFL_TESTS_DIR` | `./tests` | Directory containing test `.md` files |
-| `TOEFL_DB_PATH` | `./data/toefl.db` | SQLite database file path |
-| `SECRET_KEY` | random | Flask session encryption key |
+| `TOEFL_TESTS_DIR` | `./tests` | Where test `.md` files live |
+| `TOEFL_DB_PATH` | `./data/toefl.db` | SQLite database path |
+| `SECRET_KEY` | random | Flask session encryption |
 
----
+## 📡 API
 
-## Architecture
+<details>
+<summary>Click to expand API reference</summary>
 
-### Storage
+### Test Engine
 
-**SQLite** (single file, no external server) with eight tables:
-
-| Table | Purpose |
-|---|---|
-| `users` | Accounts with hashed passwords and roles |
-| `test_results` | Graded submissions with per-section JSON details |
-| `test_assignments` | Teacher-to-student assignments with optional section scoping and due dates |
-| `test_sessions` | Server-side test progress: answers, timer, page position, recordings, accumulated results |
-| `announcements` | Site-wide admin banners |
-| `student_notes` | Per-question student notes on results |
-| `teacher_comments` | Per-result and per-question teacher feedback |
-| `question_explanations` | Teacher-authored explanations per test/question |
-
-Audio recordings are stored on disk at `data/recordings/` (per-result subdirectories).
-
-### Server-side test sessions
-
-For logged-in users, all test progress is stored server-side in the `test_sessions` table. This includes:
-
-- Current module answers (JSON)
-- Page position within the current module
-- Remaining timer (seconds)
-- Per-question time tracking (JSON)
-- Accumulated graded results from completed modules (JSON)
-- Playlist state (which module in the test sequence)
-
-Audio recordings are uploaded per-module during the test (immediately after each speaking module is graded), stored temporarily in `data/recordings/session_{id}/`, and moved to permanent result storage (`data/recordings/{result_id}/`) when the test finishes.
-
-Guests fall back to `localStorage` for progress tracking (no server-side persistence).
-
-Stale sessions are cleaned up automatically: unfinished sessions older than 7 days and finished sessions older than 30 days are deleted when a new session is created.
-
-### Authentication
-
-Flask sessions with `werkzeug.security` password hashing. "Remember me" extends sessions to 31 days. A guest mode allows anonymous practice without login. Session is regenerated on login to prevent fixation attacks.
-
-### Security
-
-- **CSRF protection** on all form POST routes via session-based tokens. JSON API endpoints are exempt (used by the test engine).
-- **Login rate limiting**: 10 attempts per IP per 5-minute window, with automatic memory cleanup of stale IP entries.
-- **Answer security**: The `/api/grade` endpoint requires authentication (login or guest session). Correct answers are stripped from the grading response sent to the client — only correct/incorrect status and the user's own answer are visible. Full answer details (with expected values) are stored separately for the result review page.
-- **File upload limit**: 16MB max via `MAX_CONTENT_LENGTH`.
-- **Password minimum**: 6 characters enforced on creation and change.
-- **Open redirect prevention**: login `next` parameter validates relative paths only.
-- **Recording access control**: Students can only access their own recordings; teachers/admins can access any.
-
-### Server-side grading
-
-The `/api/module/` endpoint strips correct answers before sending questions to the client. When a student submits, `/api/grade` loads the test server-side, grades each question, and returns results with expected answers removed. Answers never reach the browser in exam mode.
-
-### Multi-test-type support
-
-`config.yaml` defines `test_types` with section labels and colors. Test `.md` files declare their type via `test_type:` in the YAML header. Multiple test formats coexist in the same system.
-
-### User roles
-
-| Role | Pages | Capabilities |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| **Admin** | Users, Results, Progress, Dashboard, Catalog | Manage accounts, view all results, assign tests, analytics |
-| **Teacher** | Results, Progress, Dashboard, Catalog | View results, assign tests (with due dates), teacher comments, analytics, audio playback |
-| **Student** | Assignments, Dashboard, History, Catalog, Account | Take tests, view own analytics and results, change password |
-| **Guest** | Catalog | Practice anonymously (results not saved, progress in localStorage only) |
+| GET | `/api/module/<filename>` | Load questions (answers stripped) |
+| POST | `/api/grade` | Grade answers server-side |
+| POST | `/api/save-results` | Save graded results |
 
----
+### Sessions
 
-## Features
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/session/start` | Start or resume |
+| POST | `/api/session/<id>/save` | Auto-save progress |
+| POST | `/api/session/<id>/advance` | Next module after grading |
+| GET | `/api/session/<id>` | Load session state |
+| DELETE | `/api/session/<id>` | Abandon session |
 
-### Test-taking
+### Review & Scoring
 
-- Seven question types: multiple choice, cloze (fill-in-the-blank), build-a-sentence, email, academic discussion, listen-and-repeat, interview
-- Practice mode: replayable audio, instant answer feedback, timer pause, clearly marked results
-- Timer with amber (5 min) and red (1 min) warnings; pause button in practice mode
-- Progress dots with question bookmarking (reading)
-- Listening lock: controls disabled during audio playback
-- Speaking auto-flow: audio → countdown → record with level meter → auto-stop → advance
-- Early exit confirmation when time remains
-- Keyboard navigation: A/B/C/D for MC answers, arrow keys for prev/next, Enter to advance
-- Server-side progress persistence: answers, timer, page position saved every 15 seconds
-- Cross-device resume: start a test on one device, continue on another (same account)
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/review-data/<id>` | Full review with graded questions |
+| GET | `/api/toefl-scores/<id>` | 1–6 band scores |
+| POST | `/api/rubric-score/<id>` | Save rubric score (0–5) |
+| GET/POST | `/api/notes/<id>` | Student notes |
+| GET/POST | `/api/comments/<id>` | Teacher comments |
+| GET/POST | `/api/explanations/<test_id>` | Question explanations |
+| GET | `/api/analytics/<uid>` | Score history + breakdown |
+| GET | `/api/export-pdf/<id>` | PDF report download |
+| GET | `/recordings/<id>/<qid>` | Stream a student's recording |
 
-### Management
+### Spaced Repetition
 
-- Admin dashboard: user table, role toggle, create/edit modals, bulk CSV import, announcements
-- Teacher dashboard: view all results, assign tests (full or by section) with optional due dates
-- Assignment deadlines: teacher sets per-assignment due dates, overdue shown in red
-- Student progress tracking with completion percentages
-- Self-service password change for all users (6-character minimum)
-- Bulk user import via CSV upload (with password validation)
-- Announcement banner (admin posts, shown site-wide)
-- CSV batch export: teachers select multiple students and download aggregated results
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/review-queue` | Questions due for review |
+| GET | `/api/review-count` | Count for sidebar badge |
+| POST | `/api/review-answer/<id>` | Submit review answer |
 
-### Review
+### Monitoring
 
-- Full writing response display: teachers see the complete text students wrote for email/discussion questions
-- Audio recording playback: speaking recordings uploaded per-module during the test, playable inline by teachers and students in result review
-- Student notes on individual questions
-- Teacher comments: overall per-result + per-question feedback visible to students
-- Question explanations: from markdown `[explanation]` blocks or teacher web UI, shown after submission
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/live-sessions` | Active sessions (teacher only) |
 
-### Analytics
+</details>
 
-- Student dashboard: score trend line chart, section breakdown bar chart, weakest areas
-- Teachers/admins can view analytics for any student via student selector
+## 💭 Contributing
 
-### Export
+Found a bug? Have an idea? [Open an issue](https://github.com/jiaobenhaimo/toefl-practice-system/issues) or pull request.
 
-- ZIP download with text answers and audio recordings (client-side)
-- Server-side PDF export via reportlab (student info, scores, time-per-question)
+## 📜 License
 
-### Interface
-
-- Sidebar navigation (persistent on desktop, hamburger on mobile)
-- Responsive card grid catalog with 3:2 aspect ratio cards
-- Modal overlay for test/section selection with time estimates
-- Dark mode (system detection + manual toggle, Chart.js theme-aware)
-- Chinese/English catalog UI (auto-detect + toggle)
-- Apple HIG compliance: 44px touch targets, 12px+ font sizes, `:focus-visible` outlines
-- Keyboard-accessible table rows, ARIA labels throughout
-
----
-
-## Creating tests
-
-Test authoring tools are in `authoring/`:
-
-```bash
-cat authoring/FORMAT.md                                    # Format specification
-python authoring/generate_tts_notebook.py tests/*.tts -o tts.ipynb  # TTS audio
-```
-
-Place `.md` files in `tests/` with audio in matching subfolders. See `tests/example-test.md` for all 7 question types.
-
-To add explanations to questions, place an `[explanation]...[/explanation]` block immediately after a `[question]...[/question]` block in the test markdown. Explanations are shown to students after submission in the result review page. Teachers can also add or override explanations from the web UI.
-
----
-
-## API reference
-
-### Test engine
-
-| Method | Endpoint | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/module/<filename>` | Guest+ | Load module questions (answers stripped) |
-| POST | `/api/grade` | Guest+ | Grade answers server-side (expected answers stripped from response) |
-| POST | `/api/save-results` | Login | Save final graded results to DB |
-
-### Server sessions
-
-| Method | Endpoint | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/session/start` | Login | Create or resume a test session |
-| POST | `/api/session/<id>/save` | Login | Auto-save progress (answers, timer, page) |
-| POST | `/api/session/<id>/advance` | Login | Advance to next module after grading |
-| GET | `/api/session/<id>` | Login | Load full session state |
-| DELETE | `/api/session/<id>` | Login | Abandon session and clean up recordings |
-| POST | `/api/session/<id>/upload-recording` | Login | Upload audio recordings mid-test |
-| POST | `/api/session/<id>/finalize-recordings/<result_id>` | Login | Move recordings to permanent storage |
-
-### Recordings
-
-| Method | Endpoint | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/upload-recording/<result_id>` | Login | Upload recordings to result (fallback) |
-| GET | `/recordings/<result_id>/<qid>` | Login | Serve a recording file |
-| GET | `/api/recordings/<result_id>` | Login | List available recording IDs |
-
-### Review
-
-| Method | Endpoint | Auth | Purpose |
-|---|---|---|---|
-| GET/POST | `/api/notes/<result_id>` | Login | Student notes per question |
-| GET/POST | `/api/comments/<result_id>` | Login | Teacher comments (POST: teacher/admin only) |
-| GET/POST | `/api/explanations/<test_id>` | Login | Question explanations (POST: teacher/admin only) |
-
-### Analytics
-
-| Method | Endpoint | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/analytics/<user_id>` | Login | Score history and section breakdown |
-
----
-
-## Project structure
-
-```
-├── config.yaml               Site and test type configuration
-├── app.py                    Flask server, auth, API, sessions, dashboards (~1000 lines)
-├── database.py               SQLite module: 8 tables, CRUD, sessions (~560 lines)
-├── parser.py                 Markdown test parser (~360 lines)
-├── requirements.txt          Python dependencies
-├── LICENSE                   GPL v3
-├── authoring/
-│   ├── FORMAT.md             Test format specification
-│   └── generate_tts_notebook.py  Colab TTS generator
-├── templates/
-│   ├── base.html             Base template, i18n, theme
-│   ├── nav.html              Sidebar navigation (role-conditional links)
-│   ├── login.html            Login + guest mode
-│   ├── catalog.html          Test card grid + modal with time estimates
-│   ├── assignments.html      Student assignments with due dates
-│   ├── test.html             Test-taking interface
-│   ├── history.html          Student history (paginated)
-│   ├── result_detail.html    Per-question breakdown, writing text, audio playback,
-│   │                         explanations, teacher comments, student notes
-│   ├── dashboard.html        Analytics dashboard (Chart.js, dark-mode aware)
-│   ├── admin_users.html      User management (create/edit/delete/import)
-│   ├── teacher_results.html  Results viewer + test assignment + batch export
-│   ├── teacher_progress.html Student progress tracking
-│   └── account.html          Password change
-├── static/
-│   ├── css/style.css         All styles: light + dark, Apple HIG (~540 lines)
-│   └── js/app.js             Test engine: timer, audio, recording, sessions (~1760 lines)
-├── tests/
-│   └── example-test.md       Example test (all 7 question types)
-└── data/
-    ├── toefl.db              SQLite database (auto-created)
-    └── recordings/           Audio recordings (auto-created)
-        ├── session_{id}/     Temporary per-session recordings (during test)
-        └── {result_id}/      Permanent per-result recordings (after submission)
-```
-
-## License
-
-GNU General Public License v3.0. See [LICENSE](LICENSE).
+GNU General Public License v3.0 — see [LICENSE](LICENSE).

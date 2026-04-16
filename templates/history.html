@@ -16,6 +16,12 @@
         <h2 class="page-heading">Result History</h2>
         {% endif %}
 
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="flash-msg">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+
         {% if show_analytics %}
         <!-- Analytics Section -->
         <div id="analytics-row" class="analytics-row">
@@ -75,6 +81,52 @@
             });
         })();
         </script>
+        {% endif %}
+
+        {% if pending_assignments is defined and pending_assignments %}
+        <div class="card" style="margin-top:16px">
+            <h3 class="card__title">Incomplete Assignments ({{ pending_assignments|length }})</h3>
+            <table class="user-table">
+                <thead>
+                    <tr>
+                        <th>Test</th>
+                        <th style="width:100px">Section</th>
+                        <th style="width:130px">Due Date</th>
+                        <th style="width:44px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in pending_assignments %}
+                    {% set t = tests.get(a.test_id) if tests is defined else None %}
+                    <tr>
+                        <td><strong>{{ t.test_name if t else a.test_id }}</strong></td>
+                        <td>
+                            {% if a.section %}
+                            <span class="module-chip module-chip--{{ a.section }}">{{ a.section|capitalize }}</span>
+                            {% else %}
+                            <span style="color:var(--text-muted)">Full test</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.due_date %}
+                            <span style="color:var(--{% if a.due_date < now_date %}red{% else %}text-muted{% endif %})">{{ a.due_date|fmtdate }}</span>
+                            {% else %}
+                            <span style="color:var(--text-dim)">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="user-table__actions">
+                            <form method="POST" action="/teacher/assign/{{ a.id }}/delete" style="margin:0">
+                                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn--icon" style="color:var(--red)" title="Remove" aria-label="Remove assignment">
+                                    <svg width="14" height="14" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% endif %}
 
         {% if not results %}

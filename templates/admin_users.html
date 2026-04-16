@@ -26,8 +26,15 @@
                     <div class="role-toggle" id="role-toggle">
                         <button type="button" class="role-toggle__btn role-toggle__btn--active" data-role="student" onclick="selectRole(this)">Student</button>
                         <button type="button" class="role-toggle__btn" data-role="teacher" onclick="selectRole(this)">Teacher</button>
+                        <button type="button" class="role-toggle__btn" data-role="parent" onclick="selectRole(this)">Parent</button>
                     </div>
                     <input type="hidden" name="role" id="cf-role" value="student">
+                    <select name="linked_student_id" id="cf-linked-student" class="login-input" style="display:none;flex:0.8">
+                        <option value="">Link to student...</option>
+                        {% for s in students %}
+                        <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
+                        {% endfor %}
+                    </select>
                     <div style="flex:1"></div>
                     <button type="submit" class="btn btn--primary">Create User</button>
                 </div>
@@ -142,7 +149,10 @@
 function selectRole(btn) {
     document.querySelectorAll('.role-toggle__btn').forEach(function(b) { b.classList.remove('role-toggle__btn--active'); });
     btn.classList.add('role-toggle__btn--active');
-    document.getElementById('cf-role').value = btn.getAttribute('data-role');
+    var role = btn.getAttribute('data-role');
+    document.getElementById('cf-role').value = role;
+    var linkedSelect = document.getElementById('cf-linked-student');
+    if (linkedSelect) linkedSelect.style.display = role === 'parent' ? '' : 'none';
 }
 function closeModal(id) {
     document.getElementById(id).classList.remove('test-modal-overlay--active');

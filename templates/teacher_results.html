@@ -13,40 +13,31 @@
         {% endif %}
         {% endwith %}
 
-        {% if students and tests %}
         <div class="card" style="margin-bottom:16px">
-            <h3 class="card__title">Assign Test</h3>
-            <form method="POST" action="/teacher/assign" class="form-row" style="align-items:center">
-                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                <select name="student_id" required class="login-input" style="flex:1">
-                    <option value="">Student...</option>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <select id="filter-student" class="login-input" style="flex:1;max-width:280px" onchange="filterResults()" aria-label="Filter by student">
+                    <option value="">All students</option>
                     {% for s in students %}
-                    <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
+                    <option value="{{ s.display_name }}">{{ s.display_name }} (@{{ s.username }})</option>
                     {% endfor %}
                 </select>
-                <select name="test_id" required class="login-input" style="flex:1">
-                    <option value="">Test...</option>
-                    {% for tid, t in tests.items() %}
-                    <option value="{{ tid }}">{{ t.test_name }}</option>
-                    {% endfor %}
-                </select>
-                <select name="section" class="login-input" style="flex:0.5">
-                    <option value="">Full test</option>
-                    <option value="reading">Reading</option>
-                    <option value="listening">Listening</option>
-                    <option value="writing">Writing</option>
-                    <option value="speaking">Speaking</option>
-                </select>
-                <input type="date" name="due_date" class="login-input" style="flex:0.5" title="Due date (optional)">
-                <button type="submit" class="btn btn--primary">Assign</button>
-            </form>
+                {% if students %}
+                <form method="POST" action="/teacher/export" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                    <select name="student_ids" multiple class="login-input" style="height:auto;min-height:44px;max-width:200px;padding:6px 10px;font-size:0.82rem" title="Hold Ctrl/Cmd to select">
+                        {% for s in students %}
+                        <option value="{{ s.id }}">{{ s.display_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="hidden" name="format" value="csv">
+                    <button type="submit" class="btn btn--secondary">Export CSV</button>
+                </form>
+                {% endif %}
+            </div>
         </div>
-        {% endif %}
 
         <div class="card">
-            <h3 class="card__title">All Submissions</h3>
-            {% if results %}
-            <table class="user-table">
+            <table class="user-table" id="submissions-table">
                 <thead>
                     <tr>
                         <th>Student</th>
@@ -57,8 +48,9 @@
                     </tr>
                 </thead>
                 <tbody>
+                    {% if results %}
                     {% for r in results %}
-                    <tr class="result-row--clickable" onclick="location.href='/review/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/review/{{ r.id }}'">
+                    <tr class="result-row--clickable" onclick="location.href='/review/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/review/{{ r.id }}'" data-student="{{ r.display_name or r.username or 'Guest' }}">
                         <td>
                             <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
                             {% if r.practice %}<span class="practice-badge">Practice</span>{% endif %}
@@ -75,11 +67,11 @@
                         </td>
                     </tr>
                     {% endfor %}
+                    {% else %}
+                    <tr><td colspan="5" style="color:var(--text-muted);padding:16px 0">No results yet.</td></tr>
+                    {% endif %}
                 </tbody>
             </table>
-            {% else %}
-            <p style="color:var(--text-muted);padding:16px 0">No results yet.</p>
-            {% endif %}
         </div>
         {% if total_pages > 1 %}
         <div class="pagination">
@@ -90,4 +82,17 @@
         {% endif %}
     </main>
 </div>
+
+<script>
+function filterResults() {
+    var val = document.getElementById('filter-student').value;
+    document.querySelectorAll('#submissions-table tbody tr').forEach(function(tr) {
+        if (!val || tr.getAttribute('data-student') === val) {
+            tr.style.display = '';
+        } else {
+            tr.style.display = 'none';
+        }
+    });
+}
+</script>
 {% endblock %}

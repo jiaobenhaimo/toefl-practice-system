@@ -1112,7 +1112,15 @@ function renderSpeaking(body, page) {
                 return cachedMicStream;
             }
         }
-        cachedMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Request mono audio optimized for speech — reduces bandwidth ~80%
+        cachedMicStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                channelCount: { ideal: 1 },
+                sampleRate: { ideal: 16000 },
+                echoCancellation: true,
+                noiseSuppression: true,
+            }
+        });
         return cachedMicStream;
     }
 
@@ -1135,7 +1143,10 @@ function renderSpeaking(body, page) {
 
         try {
             const stream = await getMicStream();
-            mediaRecorder = new MediaRecorder(stream, { mimeType: recordingMimeType });
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: recordingMimeType,
+                audioBitsPerSecond: 32000,  // 32kbps Opus — excellent for speech, ~5x smaller than default
+            });
             audioChunks = [];
             mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
             mediaRecorder.onstop = () => {
@@ -1594,28 +1605,6 @@ async function showFinalResults() {
                     body: '{}',
                 });
             } catch (e) {}
-        }
-        // Also upload any recordings still in memory (fallback / guest)
-        if (saveData.ok && saveData.result_id) {
-            const formData = new FormData();
-            formData.append('_csrf', typeof CSRF_TOKEN !== 'undefined' ? CSRF_TOKEN : '');
-            let hasRecordings = false;
-            for (const result of allResults) {
-                if (result.recordings) {
-                    for (const [qid, blob] of Object.entries(result.recordings)) {
-                        if (blob instanceof Blob) {
-                            formData.append('rec_' + qid, blob, 'q' + qid + '.' + recordingExt);
-                            hasRecordings = true;
-                        }
-                    }
-                }
-            }
-            if (hasRecordings) {
-                await fetch('/api/upload-recording/' + saveData.result_id, {
-                    method: 'POST',
-                    body: formData,
-                });
-            }
         }
     } catch (e) {}
 }

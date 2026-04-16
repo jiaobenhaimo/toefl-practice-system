@@ -10,16 +10,24 @@
         </a>
     </div>
     <nav class="sidebar__nav">
+        {% if user and user.role == 'parent' %}
+        <a href="/parent" class="sidebar__link" aria-label="My Child's Progress">
+            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            My Child
+        </a>
+        {% endif %}
         {% if user and user.role == 'student' %}
         <a href="/assignments" class="sidebar__link" aria-label="Assignments">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 4h12v12H4z" stroke="currentColor" stroke-width="1.5" fill="none" rx="2"/><path d="M7 9l2 2 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Assignments
         </a>
         {% endif %}
+        {% if not user or user.role != 'parent' %}
         <a href="/catalog" class="sidebar__link" aria-label="Test Library">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Test Library
         </a>
+        {% endif %}
         {% if user and user.role in ("admin","teacher") %}
         <a href="/dashboard" class="sidebar__link" aria-label="Analytics">
             <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="10" width="3" height="7" rx="1" fill="currentColor" opacity="0.4"/><rect x="8.5" y="6" width="3" height="11" rx="1" fill="currentColor" opacity="0.6"/><rect x="14" y="3" width="3" height="14" rx="1" fill="currentColor" opacity="0.8"/></svg>
@@ -30,6 +38,11 @@
         <a href="/history" class="sidebar__link" aria-label="Result History">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Result History
+        </a>
+        <a href="/review-queue" class="sidebar__link" aria-label="Review Queue" id="review-queue-link">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v7l5 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+            Review
+            <span class="review-badge" id="review-badge" style="display:none"></span>
         </a>
         {% endif %}
         {% if user and user.role in ('admin','teacher') %}
@@ -59,7 +72,7 @@
                 <span id="lang-label-nav"></span>
             </button>
         </div>
-        {% if user and user.role in ("admin","teacher") %}
+        {% if user %}
         <div class="sidebar__user">
             <span class="sidebar__user-name">{{ user.display_name }}</span>
             {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>{% endif %}
@@ -103,7 +116,24 @@ document.addEventListener('DOMContentLoaded', function() {
     if (lbl) lbl.textContent = window._lang === 'zh' ? 'EN' : '中文';
     var path = location.pathname;
     document.querySelectorAll('.sidebar__link').forEach(function(a) {
-        if (a.getAttribute('href') === path) a.classList.add('sidebar__link--active');
+        var href = a.getAttribute('href');
+        if (!href || href === '/') return;
+        // Exact match for top-level, startsWith for sub-pages
+        if (path === href || (href.length > 1 && path.startsWith(href + '/'))) {
+            a.classList.add('sidebar__link--active');
+        }
     });
+    // Review badge polling for students
+    var badge = document.getElementById('review-badge');
+    if (badge) {
+        function updateBadge() {
+            fetch('/api/review-count').then(function(r) { return r.json(); }).then(function(data) {
+                if (data.count > 0) { badge.textContent = data.count; badge.style.display = ''; }
+                else { badge.style.display = 'none'; }
+            }).catch(function() {});
+        }
+        updateBadge();
+        setInterval(updateBadge, 60000); // Refresh every minute
+    }
 });
 </script>

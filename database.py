@@ -1,10 +1,12 @@
 """
 database.py — SQLite database for users, results, and test assignments.
+Thread-local connection reuse: one connection per thread, closed at request teardown.
 """
 
 import sqlite3
 import os
 import json
+import threading
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -110,11 +112,32 @@ CREATE TABLE IF NOT EXISTS test_sessions (
     finished INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS error_bank (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    test_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    question_type TEXT NOT NULL,          -- mc, cloze, build_sentence
+    question_data_json TEXT NOT NULL,     -- Full question data to re-render
+    correct_answer TEXT NOT NULL,         -- Correct answer string
+    user_wrong_answer TEXT NOT NULL DEFAULT '',
+    interval_days INTEGER NOT NULL DEFAULT 1,
+    next_review TEXT NOT NULL DEFAULT (date('now', '+1 day')),
+    times_reviewed INTEGER NOT NULL DEFAULT 0,
+    times_correct INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, test_id, question_id)
+);
 """
 
 
-def get_db():
-    """Get a database connection."""
+_local = threading.local()
+
+
+def _connect():
+    """Create a new SQLite connection with standard pragmas."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -123,14 +146,37 @@ def get_db():
     return conn
 
 
+def get_db():
+    """Get a thread-local database connection (reused within same thread/request).
+    ~40 open/close cycles per page reduced to 1."""
+    conn = getattr(_local, 'conn', None)
+    if conn is None:
+        conn = _connect()
+        _local.conn = conn
+    return conn
+
+
+def close_conn():
+    """Close the thread-local connection. Register as Flask teardown_appcontext."""
+    conn = getattr(_local, 'conn', None)
+    if conn is not None:
+        conn.close()
+        _local.conn = None
+
+
 def init_db(config=None):
-    """Initialize database schema and create default accounts if needed."""
-    conn = get_db()
+    """Initialize database schema and create default accounts if needed.
+    Uses its own connection (runs at startup, outside request context)."""
+    conn = _connect()
     conn.executescript(SCHEMA)
     # Migrate: add due_date to test_assignments if missing
     cols = [r[1] for r in conn.execute("PRAGMA table_info(test_assignments)").fetchall()]
     if 'due_date' not in cols:
         conn.execute("ALTER TABLE test_assignments ADD COLUMN due_date TEXT DEFAULT NULL")
+    # Migrate: add linked_student_id to users for parent role
+    user_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    if 'linked_student_id' not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN linked_student_id INTEGER DEFAULT NULL")
     # Create default admin account if none exists
     admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
     if not admin:
@@ -164,7 +210,6 @@ def authenticate(username, password):
     """Check credentials, return user row or None."""
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-    conn.close()
     if user and check_password_hash(user['password_hash'], password):
         return dict(user)
     return None
@@ -174,7 +219,6 @@ def get_user(user_id):
     """Get user by ID."""
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    conn.close()
     return dict(user) if user else None
 
 
@@ -185,26 +229,21 @@ def list_users(role=None):
         rows = conn.execute("SELECT * FROM users WHERE role=? ORDER BY created_at DESC", (role,)).fetchall()
     else:
         rows = conn.execute("SELECT * FROM users ORDER BY role, created_at DESC").fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
 def create_user(username, password, role, display_name=''):
     """Create a new user. Returns user ID or raises on duplicate."""
     conn = get_db()
-    try:
-        cur = conn.execute(
-            "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
-            (username, generate_password_hash(password), role, display_name or username)
-        )
-        conn.commit()
-        uid = cur.lastrowid
-    finally:
-        conn.close()
-    return uid
+    cur = conn.execute(
+        "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
+        (username, generate_password_hash(password), role, display_name or username)
+    )
+    conn.commit()
+    return cur.lastrowid
 
 
-def update_user(user_id, display_name=None, password=None, role=None, username=None):
+def update_user(user_id, display_name=None, password=None, role=None, username=None, linked_student_id=None):
     """Update user fields."""
     conn = get_db()
     if username is not None:
@@ -215,13 +254,15 @@ def update_user(user_id, display_name=None, password=None, role=None, username=N
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(password), user_id))
     if role:
         conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+    if linked_student_id is not None:
+        conn.execute("UPDATE users SET linked_student_id=? WHERE id=?", (linked_student_id, user_id))
     conn.commit()
-    conn.close()
 
 
 def delete_user(user_id):
-    """Delete user and their results, assignments, notes, comments, and sessions."""
+    """Delete user and their results, assignments, notes, comments, sessions, and error bank."""
     conn = get_db()
+    conn.execute("DELETE FROM error_bank WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_sessions WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM teacher_comments WHERE teacher_id=?", (user_id,))
     conn.execute("DELETE FROM student_notes WHERE user_id=?", (user_id,))
@@ -229,7 +270,6 @@ def delete_user(user_id):
     conn.execute("DELETE FROM test_assignments WHERE student_id=? OR teacher_id=?", (user_id, user_id))
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
-    conn.close()
 
 
 # ===== Test results =====
@@ -244,7 +284,6 @@ def save_result(user_id, test_id, test_name, practice, total_correct, total_ques
     )
     result_id = cur.lastrowid
     conn.commit()
-    conn.close()
     return result_id
 
 
@@ -255,7 +294,6 @@ def get_result_by_id(result_id):
         "SELECT r.*, u.display_name, u.username FROM test_results r LEFT JOIN users u ON r.user_id = u.id WHERE r.id=?",
         (result_id,)
     ).fetchone()
-    conn.close()
     return dict(row) if row else None
 
 
@@ -273,7 +311,6 @@ def get_results(user_id=None, test_id=None, limit=50, offset=0):
     query += " ORDER BY r.date DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     rows = conn.execute(query, params).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -289,7 +326,6 @@ def count_results(user_id=None, test_id=None):
         query += " AND test_id=?"
         params.append(test_id)
     count = conn.execute(query, params).fetchone()[0]
-    conn.close()
     return count
 
 
@@ -308,7 +344,6 @@ def assign_test(teacher_id, student_id, test_id, section=None, due_date=None):
             (teacher_id, student_id, test_id, section, due_date)
         )
         conn.commit()
-    conn.close()
 
 
 def get_assignments(teacher_id=None, student_id=None):
@@ -325,7 +360,6 @@ def get_assignments(teacher_id=None, student_id=None):
         params.append(student_id)
     query += " ORDER BY a.assigned_at DESC"
     rows = conn.execute(query, params).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -334,7 +368,62 @@ def remove_assignment(assignment_id):
     conn = get_db()
     conn.execute("DELETE FROM test_assignments WHERE id=?", (assignment_id,))
     conn.commit()
-    conn.close()
+
+
+def get_completed_test_keys(user_id):
+    """Get set of (test_id, section_or_None) tuples for completed non-practice results."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT test_id, sections_json FROM test_results WHERE user_id=? AND practice=0",
+        (user_id,)
+    ).fetchall()
+    keys = set()
+    for r in rows:
+        keys.add((r['test_id'], None))
+        try:
+            secs = json.loads(r['sections_json']) if r['sections_json'] else []
+        except Exception: secs = []
+        for sec in secs:
+            keys.add((r['test_id'], sec.get('section')))
+    return keys
+
+
+def get_all_progress_data(student_ids):
+    """Batch-load assignments and completed keys for multiple students. Returns dict {uid: {assignments, completed_keys}}."""
+    if not student_ids:
+        return {}
+    conn = get_db()
+    placeholders = ','.join('?' * len(student_ids))
+    # All assignments for these students
+    assign_rows = conn.execute(
+        f"SELECT a.*, u.display_name as student_name, u.username as student_username "
+        f"FROM test_assignments a JOIN users u ON a.student_id = u.id "
+        f"WHERE a.student_id IN ({placeholders}) ORDER BY a.assigned_at DESC",
+        student_ids
+    ).fetchall()
+    # All non-practice results for these students (only need test_id + sections_json)
+    result_rows = conn.execute(
+        f"SELECT user_id, test_id, sections_json FROM test_results "
+        f"WHERE user_id IN ({placeholders}) AND practice=0",
+        student_ids
+    ).fetchall()
+    # Group by student
+    data = {uid: {'assignments': [], 'completed_keys': set()} for uid in student_ids}
+    for r in assign_rows:
+        sid = r['student_id']
+        if sid in data:
+            data[sid]['assignments'].append(dict(r))
+    for r in result_rows:
+        uid = r['user_id']
+        if uid not in data:
+            continue
+        data[uid]['completed_keys'].add((r['test_id'], None))
+        try:
+            secs = json.loads(r['sections_json']) if r['sections_json'] else []
+        except Exception: secs = []
+        for sec in secs:
+            data[uid]['completed_keys'].add((r['test_id'], sec.get('section')))
+    return data
 
 # ===== Announcements =====
 
@@ -345,7 +434,6 @@ def get_active_announcement():
         "SELECT a.*, u.display_name FROM announcements a JOIN users u ON a.author_id=u.id "
         "WHERE a.active=1 ORDER BY a.created_at DESC LIMIT 1"
     ).fetchone()
-    conn.close()
     return dict(row) if row else None
 
 
@@ -358,7 +446,6 @@ def create_announcement(author_id, content):
         (author_id, content)
     )
     conn.commit()
-    conn.close()
 
 
 def dismiss_announcement():
@@ -366,7 +453,6 @@ def dismiss_announcement():
     conn = get_db()
     conn.execute("UPDATE announcements SET active=0")
     conn.commit()
-    conn.close()
 
 
 # ===== Student notes =====
@@ -378,7 +464,6 @@ def get_notes(user_id, result_id):
         "SELECT * FROM student_notes WHERE user_id=? AND result_id=? ORDER BY question_id",
         (user_id, result_id)
     ).fetchall()
-    conn.close()
     return {r['question_id']: r['note'] for r in rows}
 
 
@@ -391,7 +476,6 @@ def save_note(user_id, result_id, question_id, note):
         (user_id, result_id, question_id, note)
     )
     conn.commit()
-    conn.close()
 
 
 # ===== Bulk user import =====
@@ -411,7 +495,6 @@ def bulk_create_users(users_list):
         except Exception as e:
             errors.append(f"{u['username']}: {e}")
     conn.commit()
-    conn.close()
     return created, errors
 
 
@@ -425,7 +508,6 @@ def get_teacher_comments(result_id):
         "WHERE tc.result_id=? ORDER BY tc.updated_at DESC",
         (result_id,)
     ).fetchall()
-    conn.close()
     result = {}
     for r in rows:
         key = r['question_id'] if r['question_id'] else '_overall'
@@ -442,7 +524,6 @@ def save_teacher_comment(teacher_id, result_id, question_id, comment):
         (teacher_id, result_id, question_id or None, comment)
     )
     conn.commit()
-    conn.close()
 
 
 # ===== Question explanations =====
@@ -454,7 +535,6 @@ def get_explanations(test_id):
         "SELECT question_id, explanation FROM question_explanations WHERE test_id=?",
         (test_id,)
     ).fetchall()
-    conn.close()
     return {r['question_id']: r['explanation'] for r in rows}
 
 
@@ -467,7 +547,6 @@ def save_explanation(test_id, question_id, explanation, author_id=None):
         (test_id, question_id, explanation, author_id)
     )
     conn.commit()
-    conn.close()
 
 
 # ===== Analytics =====
@@ -480,7 +559,6 @@ def get_analytics(user_id):
         "FROM test_results WHERE user_id=? AND practice=0 ORDER BY date ASC",
         (user_id,)
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -504,7 +582,6 @@ def create_session(user_id, test_id, mode, section, practice, playlist_json, tim
     )
     sid = cur.lastrowid
     conn.commit()
-    conn.close()
     return sid
 
 
@@ -516,7 +593,6 @@ def get_active_session(user_id, test_id, mode, section, practice):
         "AND section IS ? AND practice=? AND finished=0 ORDER BY updated_at DESC LIMIT 1",
         (user_id, test_id, mode, section, 1 if practice else 0)
     ).fetchone()
-    conn.close()
     return dict(row) if row else None
 
 
@@ -524,7 +600,6 @@ def get_session(session_id):
     """Get session by ID."""
     conn = get_db()
     row = conn.execute("SELECT * FROM test_sessions WHERE id=?", (session_id,)).fetchone()
-    conn.close()
     return dict(row) if row else None
 
 
@@ -537,7 +612,6 @@ def save_session_progress(session_id, answers_json, current_page, timer_left, qu
         (answers_json, current_page, timer_left, question_times_json, session_id)
     )
     conn.commit()
-    conn.close()
 
 
 def advance_session(session_id, playlist_idx, completed_json, answers_json='{}', timer_left=0):
@@ -549,7 +623,6 @@ def advance_session(session_id, playlist_idx, completed_json, answers_json='{}',
         (playlist_idx, completed_json, answers_json, timer_left, session_id)
     )
     conn.commit()
-    conn.close()
 
 
 def finish_session(session_id):
@@ -557,7 +630,6 @@ def finish_session(session_id):
     conn = get_db()
     conn.execute("UPDATE test_sessions SET finished=1, updated_at=datetime('now') WHERE id=?", (session_id,))
     conn.commit()
-    conn.close()
 
 
 def delete_session(session_id):
@@ -565,4 +637,136 @@ def delete_session(session_id):
     conn = get_db()
     conn.execute("DELETE FROM test_sessions WHERE id=?", (session_id,))
     conn.commit()
-    conn.close()
+
+
+# ===== Error Bank (Spaced Repetition) =====
+
+def add_to_error_bank(user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer=''):
+    """Add a wrong answer to the error bank. If already exists, resets interval to 1 day."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO error_bank (user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(user_id, test_id, question_id) DO UPDATE SET "
+        "user_wrong_answer=excluded.user_wrong_answer, interval_days=1, "
+        "next_review=date('now', '+1 day')",
+        (user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer)
+    )
+    conn.commit()
+
+
+def remove_from_error_bank(user_id, test_id, question_id):
+    """Remove a question from the error bank (student got it right on a real test)."""
+    conn = get_db()
+    conn.execute("DELETE FROM error_bank WHERE user_id=? AND test_id=? AND question_id=?",
+        (user_id, test_id, question_id))
+    conn.commit()
+
+
+def batch_update_error_bank(user_id, test_id, to_add, to_remove):
+    """Batch add/remove error bank items in a single transaction.
+    to_add: list of (question_id, question_type, question_data_json, correct_answer, user_wrong_answer)
+    to_remove: list of question_id strings
+    """
+    conn = get_db()
+    for qid in to_remove:
+        conn.execute("DELETE FROM error_bank WHERE user_id=? AND test_id=? AND question_id=?",
+            (user_id, test_id, qid))
+    for item in to_add:
+        conn.execute(
+            "INSERT INTO error_bank (user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, test_id, question_id) DO UPDATE SET "
+            "user_wrong_answer=excluded.user_wrong_answer, interval_days=1, "
+            "next_review=date('now', '+1 day')",
+            (user_id, test_id, item[0], item[1], item[2], item[3], item[4])
+        )
+    conn.commit()
+
+
+def get_review_queue(user_id, limit=20):
+    """Get questions due for review (next_review <= today)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM error_bank WHERE user_id=? AND next_review <= date('now') "
+        "ORDER BY next_review ASC, interval_days ASC LIMIT ?",
+        (user_id, limit)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_review_count(user_id):
+    """Count questions due for review today."""
+    conn = get_db()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM error_bank WHERE user_id=? AND next_review <= date('now')",
+        (user_id,)
+    ).fetchone()[0]
+    return count
+
+
+def answer_review(error_id, user_id, correct):
+    """Update a review item after the student answers. Correct: advance interval. Wrong: reset to 1 day."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM error_bank WHERE id=? AND user_id=?", (error_id, user_id)).fetchone()
+    if not row:
+        return
+    if correct:
+        # Advance interval: 1 -> 3 -> 7 -> 14 -> done (remove)
+        intervals = [1, 3, 7, 14]
+        current = row['interval_days']
+        idx = intervals.index(current) if current in intervals else 0
+        if idx >= len(intervals) - 1:
+            # Mastered — remove from bank
+            conn.execute("DELETE FROM error_bank WHERE id=?", (error_id,))
+        else:
+            next_interval = intervals[idx + 1]
+            conn.execute(
+                "UPDATE error_bank SET interval_days=?, next_review=date('now', '+' || ? || ' days'), "
+                "times_reviewed=times_reviewed+1, times_correct=times_correct+1 WHERE id=?",
+                (next_interval, next_interval, error_id)
+            )
+    else:
+        # Wrong — reset to 1 day
+        conn.execute(
+            "UPDATE error_bank SET interval_days=1, next_review=date('now', '+1 day'), "
+            "times_reviewed=times_reviewed+1 WHERE id=?",
+            (error_id,)
+        )
+    conn.commit()
+
+
+# ===== Live Sessions (Teacher Monitoring) =====
+
+def get_active_sessions_for_monitoring():
+    """Get all active (unfinished) sessions with user info for teacher monitoring."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT s.*, u.display_name, u.username FROM test_sessions s "
+        "JOIN users u ON s.user_id = u.id "
+        "WHERE s.finished=0 AND s.updated_at > datetime('now', '-30 minutes') "
+        "ORDER BY s.updated_at DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ===== Parent Role =====
+
+def get_linked_student(parent_id):
+    """Get the student linked to a parent account."""
+    conn = get_db()
+    parent = conn.execute("SELECT linked_student_id FROM users WHERE id=? AND role='parent'", (parent_id,)).fetchone()
+    if not parent or not parent['linked_student_id']:
+        return None
+    student = conn.execute("SELECT * FROM users WHERE id=?", (parent['linked_student_id'],)).fetchone()
+    return dict(student) if student else None
+
+
+def get_parents_of_student(student_id):
+    """Get all parent accounts linked to a student."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM users WHERE role='parent' AND linked_student_id=?",
+        (student_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]

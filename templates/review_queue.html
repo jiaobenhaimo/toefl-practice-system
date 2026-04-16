@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Review — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main" style="max-width:680px">
+        <h2 class="page-heading">Review Queue</h2>
+
+        <div id="review-empty" class="catalog-empty" style="display:none">
+            <p>No questions to review right now.</p>
+            <p class="catalog-empty__hint">Questions you get wrong on tests will appear here for spaced repetition practice.</p>
+        </div>
+
+        <div id="review-loading" class="catalog-empty">
+            <p>Loading...</p>
+        </div>
+
+        <div id="review-card" class="card" style="display:none">
+            <div id="review-progress" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:16px"></div>
+
+            <!-- MC question -->
+            <div id="review-mc" style="display:none">
+                <div id="review-mc-passage" class="review-passage" style="display:none"></div>
+                <div id="review-mc-prompt" style="font-size:1rem;font-weight:500;margin-bottom:16px"></div>
+                <div id="review-mc-choices" class="review-choices"></div>
+            </div>
+
+            <!-- Cloze question -->
+            <div id="review-cloze" style="display:none">
+                <div id="review-cloze-prompt" style="font-size:1rem;margin-bottom:16px"></div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="text" id="review-cloze-input" class="login-input" style="flex:1" placeholder="Type your answer..." autocomplete="off">
+                    <button class="btn btn--primary" onclick="submitCloze()">Check</button>
+                </div>
+            </div>
+
+            <!-- Build sentence question -->
+            <div id="review-build" style="display:none">
+                <div id="review-build-context" style="font-size:0.9rem;color:var(--text-muted);margin-bottom:12px"></div>
+                <div id="review-build-words" style="font-size:1rem;font-weight:500;margin-bottom:16px"></div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="text" id="review-build-input" class="login-input" style="flex:1" placeholder="Type the sentence..." autocomplete="off">
+                    <button class="btn btn--primary" onclick="submitBuild()">Check</button>
+                </div>
+            </div>
+
+            <!-- Feedback area -->
+            <div id="review-feedback" style="display:none;margin-top:20px;padding:16px;border-radius:var(--radius-sm)">
+                <div id="review-feedback-text" style="font-weight:600;margin-bottom:4px"></div>
+                <div id="review-feedback-detail" style="font-size:0.88rem;color:var(--text-muted)"></div>
+            </div>
+
+            <div id="review-actions" style="display:none;margin-top:20px;gap:8px;justify-content:flex-end">
+                <button class="btn btn--primary" onclick="nextReview()">Next →</button>
+            </div>
+        </div>
+
+        <div id="review-done" class="catalog-empty" style="display:none">
+            <p>All done for today!</p>
+            <p class="catalog-empty__hint">Come back tomorrow for more review.</p>
+        </div>
+    </main>
+</div>
+
+<script>
+var _queue = [];
+var _currentIdx = 0;
+var _currentItem = null;
+var _answered = false;
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function loadQueue() {
+    fetch('/api/review-queue').then(function(r) { return r.json(); }).then(function(items) {
+        document.getElementById('review-loading').style.display = 'none';
+        _queue = items;
+        _currentIdx = 0;
+        if (!items.length) {
+            document.getElementById('review-empty').style.display = '';
+            return;
+        }
+        showQuestion();
+    }).catch(function() {
+        document.getElementById('review-loading').innerHTML = '<p style="color:var(--red)">Failed to load review queue.</p>';
+    });
+}
+
+function showQuestion() {
+    if (_currentIdx >= _queue.length) {
+        document.getElementById('review-card').style.display = 'none';
+        document.getElementById('review-done').style.display = '';
+        return;
+    }
+    _currentItem = _queue[_currentIdx];
+    _answered = false;
+    var qd = _currentItem.question_data || {};
+
+    document.getElementById('review-card').style.display = '';
+    document.getElementById('review-feedback').style.display = 'none';
+    document.getElementById('review-actions').style.display = 'none';
+    document.getElementById('review-progress').textContent = 'Question ' + (_currentIdx + 1) + ' of ' + _queue.length + '  ·  Interval: ' + _currentItem.interval_days + ' day' + (_currentItem.interval_days > 1 ? 's' : '');
+
+    // Hide all type panels
+    document.getElementById('review-mc').style.display = 'none';
+    document.getElementById('review-cloze').style.display = 'none';
+    document.getElementById('review-build').style.display = 'none';
+
+    if (qd.type === 'mc') {
+        document.getElementById('review-mc').style.display = '';
+        var passageEl = document.getElementById('review-mc-passage');
+        if (qd.passage) { passageEl.innerHTML = esc(qd.passage); passageEl.style.display = ''; }
+        else { passageEl.style.display = 'none'; }
+        document.getElementById('review-mc-prompt').innerHTML = esc(qd.prompt || '');
+        var choices = qd.choices || {};
+        var html = '';
+        for (var key in choices) {
+            html += '<button class="review-choice" data-key="' + esc(key) + '" onclick="submitMC(\'' + esc(key) + '\')">';
+            html += '<span class="review-choice__key">' + esc(key) + '</span>';
+            html += '<span>' + esc(choices[key]) + '</span>';
+            html += '</button>';
+        }
+        document.getElementById('review-mc-choices').innerHTML = html;
+    } else if (qd.type === 'cloze') {
+        document.getElementById('review-cloze').style.display = '';
+        document.getElementById('review-cloze-prompt').innerHTML = 'Fill in the blank: <strong>' + esc(qd.full_word || '???') + '</strong>';
+        document.getElementById('review-cloze-input').value = '';
+        document.getElementById('review-cloze-input').focus();
+    } else if (qd.type === 'build_sentence') {
+        document.getElementById('review-build').style.display = '';
+        var details = qd.details || {};
+        document.getElementById('review-build-context').innerHTML = esc(details.context || '');
+        var words = (details.words || []).join(' / ');
+        document.getElementById('review-build-words').innerHTML = 'Words: <strong>' + esc(words) + '</strong>';
+        document.getElementById('review-build-input').value = '';
+        document.getElementById('review-build-input').focus();
+    }
+}
+
+function showFeedback(correct, detail) {
+    _answered = true;
+    var fb = document.getElementById('review-feedback');
+    fb.style.display = '';
+    fb.style.background = correct ? 'var(--green-dim)' : 'var(--red-dim)';
+    document.getElementById('review-feedback-text').textContent = correct ? '✓ Correct!' : '✗ Incorrect';
+    document.getElementById('review-feedback-text').style.color = correct ? 'var(--green)' : 'var(--red)';
+    document.getElementById('review-feedback-detail').textContent = detail;
+    document.getElementById('review-actions').style.display = 'flex';
+    // Send answer to server
+    fetch('/api/review-answer/' + _currentItem.id, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ correct: correct })
+    }).catch(function() {});
+}
+
+function submitMC(key) {
+    if (_answered) return;
+    var qd = _currentItem.question_data || {};
+    var correct = key === qd.answer;
+    // Highlight chosen
+    document.querySelectorAll('.review-choice').forEach(function(btn) {
+        var k = btn.getAttribute('data-key');
+        if (k === qd.answer) btn.classList.add('review-choice--correct');
+        if (k === key && !correct) btn.classList.add('review-choice--wrong');
+        btn.disabled = true;
+    });
+    showFeedback(correct, correct ? '' : 'Correct answer: ' + qd.answer);
+}
+
+function submitCloze() {
+    if (_answered) return;
+    var input = document.getElementById('review-cloze-input').value.trim();
+    var qd = _currentItem.question_data || {};
+    var expected = qd.fill || '';
+    var correct = input.toLowerCase() === expected.toLowerCase();
+    showFeedback(correct, correct ? '' : 'Correct: ' + (qd.full_word || expected));
+}
+
+function submitBuild() {
+    if (_answered) return;
+    var input = document.getElementById('review-build-input').value.trim();
+    var expected = (_currentItem.correct_answer || '').trim();
+    var norm = function(s) { return s.toLowerCase().replace(/[?!.]/g, ''); };
+    var correct = norm(input) === norm(expected);
+    showFeedback(correct, correct ? '' : 'Correct: ' + expected);
+}
+
+function nextReview() {
+    _currentIdx++;
+    showQuestion();
+}
+
+// Enter key submits for cloze/build
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' || _answered) return;
+    if (document.getElementById('review-cloze').style.display !== 'none') submitCloze();
+    else if (document.getElementById('review-build').style.display !== 'none') submitBuild();
+    else if (_answered) nextReview();
+});
+
+document.addEventListener('DOMContentLoaded', loadQueue);
+</script>
+{% endblock %}

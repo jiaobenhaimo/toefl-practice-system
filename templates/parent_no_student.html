@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Parent — {{ site.name }}{% endblock %}
+
+{% block body %}
+<div class="layout">
+    {% include "nav.html" %}
+    <main class="layout__main" style="max-width:520px">
+        <h2 class="page-heading">Parent Dashboard</h2>
+
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="flash-msg">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="catalog-empty">
+            <p>No student linked to your account.</p>
+            <p class="catalog-empty__hint">Please ask your child's teacher or the administrator to link your account.</p>
+        </div>
+    </main>
+</div>
+{% endblock %}

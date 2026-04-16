@@ -7,6 +7,58 @@
     <main class="layout__main">
         <h2 class="page-heading">Progress Tracking</h2>
 
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="flash-msg">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+
+        <!-- Live Sessions Monitor -->
+        <div class="card" style="margin-bottom:20px" id="live-card">
+            <h3 class="card__title">
+                <span class="live-dot" id="live-dot"></span>
+                Live Sessions
+                <span style="font-weight:400;font-size:0.82rem;color:var(--text-muted)" id="live-count"></span>
+            </h3>
+            <div id="live-sessions">
+                <p style="color:var(--text-muted);font-size:0.88rem">Checking...</p>
+            </div>
+        </div>
+
+        {% if progress and tests %}
+        <div class="card" style="margin-bottom:20px">
+            <h3 class="card__title">Assign Test</h3>
+            <form method="POST" action="/teacher/assign" style="display:flex;flex-direction:column;gap:10px">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                <div class="form-row">
+                    <select name="student_id" required class="login-input" style="flex:1" aria-label="Student">
+                        <option value="">Student...</option>
+                        {% for p in progress %}
+                        <option value="{{ p.student.id }}">{{ p.student.display_name }} (@{{ p.student.username }})</option>
+                        {% endfor %}
+                    </select>
+                    <select name="test_id" required class="login-input" style="flex:1" aria-label="Test">
+                        <option value="">Test...</option>
+                        {% for tid, t in tests.items() %}
+                        <option value="{{ tid }}">{{ t.test_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-row">
+                    <select name="section" class="login-input" style="flex:1" aria-label="Section">
+                        <option value="">Full test</option>
+                        <option value="reading">Reading</option>
+                        <option value="listening">Listening</option>
+                        <option value="writing">Writing</option>
+                        <option value="speaking">Speaking</option>
+                    </select>
+                    <input type="date" name="due_date" class="login-input" style="flex:1" title="Due date (optional)" aria-label="Due date">
+                    <button type="submit" class="btn btn--primary">Assign</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
         {% if not progress %}
         <div class="catalog-empty">
             <p>No students found.</p>
@@ -14,9 +66,9 @@
         {% else %}
         <div class="results-list">
             {% for p in progress %}
-            <div class="progress-row" style="flex-wrap:wrap">
+            <a href="/teacher/student/{{ p.student.id }}" class="progress-row" style="text-decoration:none;color:inherit">
                 <div class="progress-row__info">
-                    <a href="/teacher/student/{{ p.student.id }}" style="text-decoration:none;color:inherit"><strong>{{ p.student.display_name }}</strong></a>
+                    <strong>{{ p.student.display_name }}</strong>
                     <span style="color:var(--text-dim)">@{{ p.student.username }}</span>
                 </div>
                 <div class="progress-row__bar-wrap">
@@ -28,30 +80,64 @@
                     {{ p.done }}/{{ p.total }}
                     <span style="color:var(--text-dim)">({{ p.pct }}%)</span>
                 </div>
-                {% if p.assignments %}
-                <details style="width:100%;margin-top:8px">
-                    <summary style="font-size:0.82rem;color:var(--text-muted);cursor:pointer">{{ p.assignments|length }} assignment(s)</summary>
-                    <div style="padding:8px 0 0 0">
-                        {% for a in p.assignments %}
-                        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.88rem">
-                            <span>{{ a.test_id }}{% if a.section %} · {{ a.section|capitalize }}{% endif %}</span>
-                            {% if a.due_date %}<span style="color:var(--text-dim)">Due {{ a.due_date|fmtdate }}</span>{% endif %}
-                            <span style="flex:1"></span>
-                            <form method="POST" action="/teacher/assign/{{ a.id }}/delete" style="margin:0" onsubmit="return confirm('Remove this assignment?')">
-                                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn--icon" style="width:28px;height:28px;min-width:28px;min-height:28px;color:var(--red)" title="Remove" aria-label="Remove assignment">
-                                    <svg width="14" height="14" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                                </button>
-                            </form>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </details>
-                {% endif %}
-            </div>
+            </a>
             {% endfor %}
         </div>
         {% endif %}
     </main>
 </div>
+
+<script>
+function formatTimer(seconds) {
+    if (!seconds || seconds <= 0) return '—';
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function renderLiveSessions(sessions) {
+    var el = document.getElementById('live-sessions');
+    var dot = document.getElementById('live-dot');
+    var countEl = document.getElementById('live-count');
+    if (!sessions.length) {
+        el.innerHTML = '<p style="color:var(--text-muted);font-size:0.88rem">No active sessions right now.</p>';
+        dot.className = 'live-dot';
+        countEl.textContent = '';
+        return false;
+    }
+    dot.className = 'live-dot live-dot--active';
+    countEl.textContent = '(' + sessions.length + ')';
+    var html = '<div class="live-sessions-grid">';
+    sessions.forEach(function(s) {
+        var progress = s.total_pages > 0 ? Math.round(s.current_page / s.total_pages * 100) : 0;
+        html += '<div class="live-session-card">';
+        html += '<div class="live-session-card__name">' + esc(s.student_name) + '</div>';
+        html += '<div class="live-session-card__test">' + esc(s.test_name);
+        if (s.practice) html += ' <span class="practice-badge">PRACTICE</span>';
+        html += '</div>';
+        html += '<div class="live-session-card__detail">' + esc(s.module) + ' · Page ' + s.current_page + '/' + s.total_pages + '</div>';
+        html += '<div class="live-session-card__bar"><div class="live-session-card__fill" style="width:' + progress + '%"></div></div>';
+        html += '<div class="live-session-card__timer">' + formatTimer(s.timer_left) + ' remaining</div>';
+        html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+    return true;
+}
+
+var _liveInterval = 15000;
+function pollLiveSessions() {
+    fetch('/api/live-sessions').then(function(r) { return r.json(); }).then(function(sessions) {
+        var hasActive = renderLiveSessions(sessions);
+        _liveInterval = hasActive ? 15000 : Math.min(_liveInterval * 2, 60000);
+        setTimeout(pollLiveSessions, _liveInterval);
+    }).catch(function() {
+        _liveInterval = Math.min(_liveInterval * 2, 60000);
+        setTimeout(pollLiveSessions, _liveInterval);
+    });
+}
+pollLiveSessions();
+</script>
 {% endblock %}
