@@ -6,7 +6,7 @@ import os, json, secrets, re, shutil, io, csv
 from datetime import datetime as dt
 from flask import (
     Flask, render_template, jsonify, request, session,
-    send_from_directory, abort, redirect, url_for, flash, send_file, g
+    send_from_directory, abort, redirect, flash, send_file, g
 )
 from parser import build_question_list
 import database as db
@@ -215,9 +215,9 @@ def api_save_results():
     sections = data.get('sections', [])
     test_id = data.get('test_id', '')
     tests = cached_scan()
+    question_data_map = {}  # Also build error bank data in same pass
     if test_id in tests:
-        # Build answer key from all modules
-        answer_key = {}  # {qid: {'expected': ..., 'fullWord': ...}}
+        answer_key = {}
         t = tests[test_id]
         seen_files = set()
         for mod_info in t['modules']:
@@ -233,15 +233,29 @@ def api_save_results():
                         qt = pg.get('question_type', '')
                         if qt == 'mc':
                             answer_key[qid] = {'expected': pg.get('answer', '')}
+                            question_data_map[qid] = {
+                                'type': 'mc', 'prompt': pg.get('prompt', ''),
+                                'choices': pg.get('choices', {}), 'answer': pg.get('answer', ''),
+                                'passage': pg.get('passage', '')[:500],
+                            }
                         elif qt == 'cloze':
                             fills = pg.get('cloze_fills', [])
                             words = pg.get('cloze_answers', [])
                             for i, ef in enumerate(fills):
                                 cqid = f'{qid}.{i+1}'
                                 answer_key[cqid] = {'expected': ef, 'fullWord': words[i] if i < len(words) else ef}
+                                question_data_map[cqid] = {
+                                    'type': 'cloze', 'fill': ef,
+                                    'full_word': words[i] if i < len(words) else ef,
+                                    'passage': pg.get('passage', '')[:500],
+                                }
                         elif qt == 'build_sentence':
                             answer_key[qid] = {'expected': pg.get('answer', '')}
-        # Merge expected answers into section details
+                            question_data_map[qid] = {
+                                'type': 'build_sentence',
+                                'details': pg.get('details', {}),
+                                'answer': pg.get('answer', ''),
+                            }
         for sec in sections:
             for d in sec.get('details', []):
                 qid = str(d.get('qid', ''))
@@ -250,14 +264,13 @@ def api_save_results():
     result_id = db.save_result(u['id'], test_id, data.get('test_name',''),
         data.get('practice',False), data.get('total_correct',0),
         data.get('total_questions',0), json.dumps(sections))
-    # Clean up the session if provided
     session_id = data.get('session_id')
     if session_id:
         try: db.finish_session(session_id)
         except Exception: pass
-    # Auto-populate error bank from wrong auto-graded answers (non-practice only)
+    # Auto-populate error bank (non-practice only), reusing parsed data
     if not data.get('practice', False):
-        _populate_error_bank(u['id'], test_id, sections, tests if test_id in tests else {})
+        _populate_error_bank(u['id'], test_id, sections, question_data_map)
     return jsonify({'ok':True, 'result_id': result_id})
 
 # ===== Server-side Test Sessions =====
@@ -1104,48 +1117,9 @@ def export_pdf_by_result(result_id):
 
 # ===== Error Bank (Spaced Repetition) =====
 
-def _populate_error_bank(user_id, test_id, sections, tests_map):
+def _populate_error_bank(user_id, test_id, sections, question_data_map):
     """Auto-populate error bank from wrong auto-graded answers.
-    Also removes questions the student got right (they've learned it)."""
-    # Build question data lookup from parsed test
-    question_data_map = {}
-    if test_id in tests_map:
-        t = tests_map[test_id]
-        seen = set()
-        for mi in t['modules']:
-            fn = mi['filename']
-            if fn in seen: continue
-            seen.add(fn)
-            fp = safe_path(TESTS_DIR, fn)
-            if fp and os.path.exists(fp):
-                parsed = cached_parse(fp)
-                for mod in parsed['modules']:
-                    for pg in build_question_list(mod):
-                        qid = str(pg.get('question_id', ''))
-                        qt = pg.get('question_type', '')
-                        if qt == 'mc':
-                            question_data_map[qid] = {
-                                'type': 'mc', 'prompt': pg.get('prompt', ''),
-                                'choices': pg.get('choices', {}), 'answer': pg.get('answer', ''),
-                                'passage': pg.get('passage', '')[:500],  # Truncate for storage
-                            }
-                        elif qt == 'cloze':
-                            fills = pg.get('cloze_fills', [])
-                            words = pg.get('cloze_answers', [])
-                            for i, ef in enumerate(fills):
-                                cqid = f'{qid}.{i+1}'
-                                question_data_map[cqid] = {
-                                    'type': 'cloze', 'fill': ef,
-                                    'full_word': words[i] if i < len(words) else ef,
-                                    'passage': pg.get('passage', '')[:500],
-                                }
-                        elif qt == 'build_sentence':
-                            question_data_map[qid] = {
-                                'type': 'build_sentence',
-                                'details': pg.get('details', {}),
-                                'answer': pg.get('answer', ''),
-                            }
-    # Process graded details — collect batch operations
+    question_data_map is pre-built by api_save_results to avoid duplicate parsing."""
     to_add = []
     to_remove = []
     for sec in sections:

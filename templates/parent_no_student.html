@@ -5,7 +5,7 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main" style="max-width:520px">
-        <h2 class="page-heading">Parent Dashboard</h2>
+        <h2 class="page-heading" data-i18n="pageParent">Parent Dashboard</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -14,8 +14,8 @@
         {% endwith %}
 
         <div class="catalog-empty">
-            <p>No student linked to your account.</p>
-            <p class="catalog-empty__hint">Please ask your child's teacher or the administrator to link your account.</p>
+            <p data-i18n="noStudentLinked">No student linked to your account.</p>
+            <p class="catalog-empty__hint" data-i18n="noStudentHint">Please ask your child's teacher or the administrator to link your account.</p>
         </div>
     </main>
 </div>

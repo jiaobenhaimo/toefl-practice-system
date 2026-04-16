@@ -13,35 +13,35 @@
         {% if user and user.role == 'parent' %}
         <a href="/parent" class="sidebar__link" aria-label="My Child's Progress">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-            My Child
+            <span data-i18n="navMyChild">My Child</span>
         </a>
         {% endif %}
         {% if user and user.role == 'student' %}
         <a href="/assignments" class="sidebar__link" aria-label="Assignments">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 4h12v12H4z" stroke="currentColor" stroke-width="1.5" fill="none" rx="2"/><path d="M7 9l2 2 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Assignments
+            <span data-i18n="navAssignments">Assignments</span>
         </a>
         {% endif %}
         {% if not user or user.role != 'parent' %}
         <a href="/catalog" class="sidebar__link" aria-label="Test Library">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            Test Library
+            <span data-i18n="navTestLibrary">Test Library</span>
         </a>
         {% endif %}
         {% if user and user.role in ("admin","teacher") %}
         <a href="/dashboard" class="sidebar__link" aria-label="Analytics">
             <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="10" width="3" height="7" rx="1" fill="currentColor" opacity="0.4"/><rect x="8.5" y="6" width="3" height="11" rx="1" fill="currentColor" opacity="0.6"/><rect x="14" y="3" width="3" height="14" rx="1" fill="currentColor" opacity="0.8"/></svg>
-            Analytics
+            <span data-i18n="navAnalytics">Analytics</span>
         </a>
         {% endif %}
         {% if user and user.role == 'student' %}
         <a href="/history" class="sidebar__link" aria-label="Result History">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            Result History
+            <span data-i18n="navHistory">Result History</span>
         </a>
         <a href="/review-queue" class="sidebar__link" aria-label="Review Queue" id="review-queue-link">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v7l5 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-            Review
+            <span data-i18n="navReview">Review</span>
             <span class="review-badge" id="review-badge" style="display:none"></span>
         </a>
         {% endif %}
@@ -49,17 +49,17 @@
         <div class="sidebar__divider"></div>
         <a href="/teacher/results" class="sidebar__link" aria-label="Submissions">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 15l4-6 3 3 4-5 3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Submissions
+            <span data-i18n="navSubmissions">Submissions</span>
         </a>
         <a href="/teacher/progress" class="sidebar__link" aria-label="Student Progress">
             <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="12" width="3" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="8.5" y="8" width="3" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="14" y="4" width="3" height="13" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-            Progress Tracking
+            <span data-i18n="navProgress">Progress Tracking</span>
         </a>
         {% endif %}
         {% if user and user.role == 'admin' %}
         <a href="/admin/users" class="sidebar__link" aria-label="Manage Users">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-            Users
+            <span data-i18n="navUsers">Users</span>
         </a>
         {% endif %}
     </nav>
@@ -79,15 +79,15 @@
         </div>
         <a href="/account" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Account settings">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-            Account
+            <span data-i18n="navAccount">Account</span>
         </a>
         <a href="/logout" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Log out">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Log out
+            <span data-i18n="navLogOut">Log out</span>
         </a>
         {% elif is_guest %}
         <div class="sidebar__user">
-            <span class="sidebar__user-name">Guest</span>
+            <span class="sidebar__user-name" data-i18n="navGuest">Guest</span>
         </div>
         <a href="/login" class="sidebar__link sidebar__link--footer" aria-label="Log in">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4h2a1 1 0 011 1v10a1 1 0 01-1 1h-2M10 14l-4-4 4-4M6 10h8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>

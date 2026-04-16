@@ -12,20 +12,20 @@
             <span class="login-brand__title">{{ site.name }}</span>
         </div>
         {% if error %}
-        <div class="login-error">{{ error }}</div>
+        <div class="login-error" data-i18n="loginError">{{ error }}</div>
         {% endif %}
         <form method="POST" class="login-form">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <input type="text" name="username" placeholder="Username" required autofocus autocomplete="username" class="login-input" aria-label="Username">
-            <input type="password" name="password" placeholder="Password" required autocomplete="current-password" class="login-input" aria-label="Password">
+            <input type="text" name="username" placeholder="Username" data-i18n-placeholder="loginUsername" required autofocus autocomplete="username" class="login-input">
+            <input type="password" name="password" placeholder="Password" data-i18n-placeholder="loginPassword" required autocomplete="current-password" class="login-input">
             <label class="login-remember">
-                <input type="checkbox" name="remember"> Remember me
+                <input type="checkbox" name="remember"> <span data-i18n="loginRemember">Remember me</span>
             </label>
-            <button type="submit" class="btn btn--primary login-btn">Log in</button>
+            <button type="submit" class="btn btn--primary login-btn" data-i18n="loginSubmit">Log in</button>
         </form>
         <div class="login-divider"><span>or</span></div>
-        <a href="/guest" class="btn btn--secondary login-btn">Continue as Guest</a>
-        <p class="login-guest-note">Guests can practice but results won't be saved.</p>
+        <a href="/guest" class="btn btn--secondary login-btn" data-i18n="loginGuest">Continue as Guest</a>
+        <p class="login-guest-note" data-i18n="loginGuestNote">Guests can practice but results won't be saved.</p>
     </div>
 </div>
 {% endblock %}

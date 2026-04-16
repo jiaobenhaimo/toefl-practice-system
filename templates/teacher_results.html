@@ -5,7 +5,7 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">Submissions</h2>
+        <h2 class="page-heading" data-i18n="pageSubmissions">Submissions</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -16,7 +16,7 @@
         <div class="card" style="margin-bottom:16px">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                 <select id="filter-student" class="login-input" style="flex:1;max-width:280px" onchange="filterResults()" aria-label="Filter by student">
-                    <option value="">All students</option>
+                    <option value="" data-i18n="allStudents">All students</option>
                     {% for s in students %}
                     <option value="{{ s.display_name }}">{{ s.display_name }} (@{{ s.username }})</option>
                     {% endfor %}
@@ -30,7 +30,7 @@
                         {% endfor %}
                     </select>
                     <input type="hidden" name="format" value="csv">
-                    <button type="submit" class="btn btn--secondary">Export CSV</button>
+                    <button type="submit" class="btn btn--secondary" data-i18n="exportCSV">Export CSV</button>
                 </form>
                 {% endif %}
             </div>
@@ -40,10 +40,10 @@
             <table class="user-table" id="submissions-table">
                 <thead>
                     <tr>
-                        <th>Student</th>
-                        <th>Test</th>
-                        <th style="width:100px">Score</th>
-                        <th style="width:130px">Date</th>
+                        <th data-i18n="student">Student</th>
+                        <th data-i18n="colTest">Test</th>
+                        <th style="width:100px" data-i18n="colScore">Score</th>
+                        <th style="width:130px" data-i18n="colDate">Date</th>
                         <th style="width:44px"></th>
                     </tr>
                 </thead>
@@ -68,7 +68,7 @@
                     </tr>
                     {% endfor %}
                     {% else %}
-                    <tr><td colspan="5" style="color:var(--text-muted);padding:16px 0">No results yet.</td></tr>
+                    <tr><td colspan="5" style="color:var(--text-muted);padding:16px 0"><span data-i18n="noResultsYet">No results yet.</span></td></tr>
                     {% endif %}
                 </tbody>
             </table>

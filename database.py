@@ -641,28 +641,6 @@ def delete_session(session_id):
 
 # ===== Error Bank (Spaced Repetition) =====
 
-def add_to_error_bank(user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer=''):
-    """Add a wrong answer to the error bank. If already exists, resets interval to 1 day."""
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO error_bank (user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(user_id, test_id, question_id) DO UPDATE SET "
-        "user_wrong_answer=excluded.user_wrong_answer, interval_days=1, "
-        "next_review=date('now', '+1 day')",
-        (user_id, test_id, question_id, question_type, question_data_json, correct_answer, user_wrong_answer)
-    )
-    conn.commit()
-
-
-def remove_from_error_bank(user_id, test_id, question_id):
-    """Remove a question from the error bank (student got it right on a real test)."""
-    conn = get_db()
-    conn.execute("DELETE FROM error_bank WHERE user_id=? AND test_id=? AND question_id=?",
-        (user_id, test_id, question_id))
-    conn.commit()
-
-
 def batch_update_error_bank(user_id, test_id, to_add, to_remove):
     """Batch add/remove error bank items in a single transaction.
     to_add: list of (question_id, question_type, question_data_json, correct_answer, user_wrong_answer)
@@ -760,13 +738,3 @@ def get_linked_student(parent_id):
         return None
     student = conn.execute("SELECT * FROM users WHERE id=?", (parent['linked_student_id'],)).fetchone()
     return dict(student) if student else None
-
-
-def get_parents_of_student(student_id):
-    """Get all parent accounts linked to a student."""
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM users WHERE role='parent' AND linked_student_id=?",
-        (student_id,)
-    ).fetchall()
-    return [dict(r) for r in rows]

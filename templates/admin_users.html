@@ -5,7 +5,7 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">User Management</h2>
+        <h2 class="page-heading" data-i18n="pageUsers">User Management</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -14,44 +14,44 @@
         {% endwith %}
 
         <div class="card" style="margin-bottom:16px">
-            <h3 class="card__title">Create User</h3>
+            <h3 class="card__title" data-i18n="createUser">Create User</h3>
             <form method="POST" action="/admin/users/create" id="create-form" onsubmit="return confirmCreate(event)">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <div class="form-row" style="margin-bottom:12px">
-                    <input type="text" name="username" placeholder="Username" required class="login-input" id="cf-username">
-                    <input type="text" name="display_name" placeholder="Display name" class="login-input" id="cf-display">
-                    <input type="password" name="password" placeholder="Password" required class="login-input" id="cf-password" autocomplete="new-password">
+                    <input type="text" name="username" placeholder="Username" data-i18n-placeholder="username" required class="login-input" id="cf-username">
+                    <input type="text" name="display_name" placeholder="Display name" data-i18n-placeholder="displayName" class="login-input" id="cf-display">
                 </div>
                 <div class="form-row" style="align-items:center">
                     <div class="role-toggle" id="role-toggle">
-                        <button type="button" class="role-toggle__btn role-toggle__btn--active" data-role="student" onclick="selectRole(this)">Student</button>
-                        <button type="button" class="role-toggle__btn" data-role="teacher" onclick="selectRole(this)">Teacher</button>
-                        <button type="button" class="role-toggle__btn" data-role="parent" onclick="selectRole(this)">Parent</button>
+                        <button type="button" class="role-toggle__btn role-toggle__btn--active role-toggle__btn--student" data-role="student" onclick="selectRole(this)">Student</button>
+                        <button type="button" class="role-toggle__btn role-toggle__btn--teacher" data-role="teacher" onclick="selectRole(this)">Teacher</button>
+                        <button type="button" class="role-toggle__btn role-toggle__btn--parent" data-role="parent" onclick="selectRole(this)">Parent</button>
                     </div>
                     <input type="hidden" name="role" id="cf-role" value="student">
                     <select name="linked_student_id" id="cf-linked-student" class="login-input" style="display:none;flex:0.8">
-                        <option value="">Link to student...</option>
+                        <option value="" data-i18n="linkToStudent">Link to student...</option>
                         {% for s in students %}
                         <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
                         {% endfor %}
                     </select>
                     <div style="flex:1"></div>
-                    <button type="submit" class="btn btn--primary">Create User</button>
+                    <button type="submit" class="btn btn--primary" data-i18n="createUser">Create User</button>
                 </div>
+                <div style="font-size:0.82rem;color:var(--text-muted);margin-top:8px"><span data-i18n="defaultPassword">Default password:</span> <strong>12345678</strong></div>
             </form>
         </div>
 
         <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
             <div class="card" style="flex:1;min-width:260px">
-                <h3 class="card__title">Bulk Import</h3>
+                <h3 class="card__title" data-i18n="bulkImport">Bulk Import</h3>
                 <form method="POST" action="/admin/users/import" enctype="multipart/form-data" class="form-row" style="align-items:center">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                     <input type="file" name="csv_file" accept=".csv" required class="login-input" style="padding:8px">
-                    <button type="submit" class="btn btn--secondary">Import</button>
+                    <button type="submit" class="btn btn--secondary" data-i18n="import_">Import</button>
                 </form>
             </div>
             <div class="card" style="flex:1;min-width:260px">
-                <h3 class="card__title">Announcement</h3>
+                <h3 class="card__title" data-i18n="announcement">Announcement</h3>
                 {% if announcement %}
                 <div style="background:var(--accent-dim);padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:10px;font-size:0.88rem;display:flex;align-items:center;gap:8px">
                     <span style="flex:1">{{ announcement.content }}</span>
@@ -63,20 +63,20 @@
                 {% endif %}
                 <form method="POST" action="/admin/announcement" class="form-row" style="align-items:center">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                    <input type="text" name="content" placeholder="Type announcement..." required class="login-input">
-                    <button type="submit" class="btn btn--secondary">Post</button>
+                    <input type="text" name="content" placeholder="Type announcement..." data-i18n-placeholder="typeAnnouncement" required class="login-input">
+                    <button type="submit" class="btn btn--secondary" data-i18n="post">Post</button>
                 </form>
             </div>
         </div>
 
         <div class="card">
-            <h3 class="card__title">All Users ({{ users|length }})</h3>
+            <h3 class="card__title"><span data-i18n="allUsers">All Users</span> ({{ users|length }})</h3>
             <table class="user-table">
                 <thead>
                     <tr>
-                        <th style="width:80px">Role</th>
-                        <th>User</th>
-                        <th style="width:140px">Created</th>
+                        <th style="width:80px" data-i18n="colRole">Role</th>
+                        <th data-i18n="colUser">User</th>
+                        <th style="width:140px" data-i18n="colCreated">Created</th>
                         <th style="width:80px"></th>
                     </tr>
                 </thead>
@@ -113,11 +113,11 @@
 <div class="test-modal-overlay" id="confirm-overlay" onclick="if(event.target===this)closeModal('confirm-overlay')">
     <div class="test-modal" role="dialog">
         <button class="test-modal__close" onclick="closeModal('confirm-overlay')" aria-label="Close"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-        <h3 class="test-modal__title">Confirm New User</h3>
+        <h3 class="test-modal__title" data-i18n="confirmNewUser">Confirm New User</h3>
         <div id="confirm-body" style="margin:16px 0;font-size:0.95rem;line-height:1.6"></div>
         <div style="display:flex;gap:10px;justify-content:flex-end">
-            <button class="btn btn--secondary" onclick="closeModal('confirm-overlay')">Cancel</button>
-            <button class="btn btn--primary" id="confirm-submit">Create</button>
+            <button class="btn btn--secondary" onclick="closeModal('confirm-overlay')" data-i18n="cancel">Cancel</button>
+            <button class="btn btn--primary" id="confirm-submit" data-i18n="create">Create</button>
         </div>
     </div>
 </div>
@@ -126,20 +126,33 @@
 <div class="test-modal-overlay" id="edit-overlay" onclick="if(event.target===this)closeModal('edit-overlay')">
     <div class="test-modal" role="dialog">
         <button class="test-modal__close" onclick="closeModal('edit-overlay')" aria-label="Close"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-        <h3 class="test-modal__title">Edit User</h3>
-        <form method="POST" id="edit-form" style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
-                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <div style="font-size:0.88rem;color:var(--text-muted)" id="edit-username-label"></div>
-            <input type="text" name="display_name" id="edit-display" placeholder="Display name" class="login-input">
-            <input type="password" name="password" placeholder="New password (leave blank to keep)" class="login-input" autocomplete="new-password">
-            <select name="role" id="edit-role" class="login-input">
-                <option value="student">Student</option>
-                <option value="teacher">Teacher</option>
-                <option value="admin">Admin</option>
-            </select>
-            <div style="display:flex;gap:10px;justify-content:flex-end">
-                <button type="button" class="btn btn--secondary" onclick="closeModal('edit-overlay')">Cancel</button>
-                <button type="submit" class="btn btn--primary">Save</button>
+        <h3 class="test-modal__title" data-i18n="editUser">Edit User</h3>
+        <form method="POST" id="edit-form" style="display:flex;flex-direction:column;gap:14px;margin-top:16px">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <div>
+                <label style="font-size:0.82rem;color:var(--text-muted);display:block;margin-bottom:4px" data-i18n="loginNameLabel">Login username</label>
+                <input type="text" name="username" id="edit-username" class="login-input">
+            </div>
+            <div>
+                <label style="font-size:0.82rem;color:var(--text-muted);display:block;margin-bottom:4px" data-i18n="displayNameLabel">Display name</label>
+                <input type="text" name="display_name" id="edit-display" class="login-input">
+            </div>
+            <div>
+                <label style="font-size:0.82rem;color:var(--text-muted);display:block;margin-bottom:4px" data-i18n="roleLabel">Role</label>
+                <div class="role-toggle" id="edit-role-toggle">
+                    <button type="button" class="role-toggle__btn role-toggle__btn--student" data-role="student" onclick="selectEditRole(this)">Student</button>
+                    <button type="button" class="role-toggle__btn role-toggle__btn--teacher" data-role="teacher" onclick="selectEditRole(this)">Teacher</button>
+                    <button type="button" class="role-toggle__btn role-toggle__btn--parent" data-role="parent" onclick="selectEditRole(this)">Parent</button>
+                </div>
+                <input type="hidden" name="role" id="edit-role" value="student">
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;font-size:0.88rem">
+                <input type="checkbox" name="reset_password" value="on" id="edit-reset-pw" style="width:20px;height:20px;accent-color:var(--accent)">
+                Reset password to <strong>12345678</strong>
+            </label>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
+                <button type="button" class="btn btn--secondary" onclick="closeModal('edit-overlay')" data-i18n="cancel">Cancel</button>
+                <button type="submit" class="btn btn--primary" data-i18n="save">Save</button>
             </div>
         </form>
     </div>
@@ -147,12 +160,17 @@
 
 <script>
 function selectRole(btn) {
-    document.querySelectorAll('.role-toggle__btn').forEach(function(b) { b.classList.remove('role-toggle__btn--active'); });
+    document.querySelectorAll('#role-toggle .role-toggle__btn').forEach(function(b) { b.classList.remove('role-toggle__btn--active'); });
     btn.classList.add('role-toggle__btn--active');
     var role = btn.getAttribute('data-role');
     document.getElementById('cf-role').value = role;
     var linkedSelect = document.getElementById('cf-linked-student');
     if (linkedSelect) linkedSelect.style.display = role === 'parent' ? '' : 'none';
+}
+function selectEditRole(btn) {
+    document.querySelectorAll('#edit-role-toggle .role-toggle__btn').forEach(function(b) { b.classList.remove('role-toggle__btn--active'); });
+    btn.classList.add('role-toggle__btn--active');
+    document.getElementById('edit-role').value = btn.getAttribute('data-role');
 }
 function closeModal(id) {
     document.getElementById(id).classList.remove('test-modal-overlay--active');
@@ -174,6 +192,8 @@ function confirmCreate(e) {
     badge.className = 'role-badge role-badge--' + role;
     badge.textContent = role;
     body.appendChild(badge);
+    body.appendChild(document.createElement('br'));
+    body.appendChild(document.createTextNode('Password: 12345678'));
     document.getElementById('confirm-submit').onclick = function() {
         document.getElementById('create-form').onsubmit = null;
         document.getElementById('create-form').submit();
@@ -183,9 +203,14 @@ function confirmCreate(e) {
 }
 function openEditModal(uid, displayName, username, role) {
     document.getElementById('edit-form').action = '/admin/users/' + uid + '/edit';
+    document.getElementById('edit-username').value = username;
     document.getElementById('edit-display').value = displayName;
-    document.getElementById('edit-username-label').textContent = '@' + username;
     document.getElementById('edit-role').value = role;
+    document.getElementById('edit-reset-pw').checked = false;
+    // Set active role button
+    document.querySelectorAll('#edit-role-toggle .role-toggle__btn').forEach(function(b) {
+        b.classList.toggle('role-toggle__btn--active', b.getAttribute('data-role') === role);
+    });
     document.getElementById('edit-overlay').classList.add('test-modal-overlay--active');
 }
 document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeModal('confirm-overlay'); closeModal('edit-overlay'); } });

@@ -7,8 +7,8 @@
     <main class="layout__main">
         {% if not tests %}
         <div class="catalog-empty">
-            <p>No tests found.</p>
-            <p class="catalog-empty__hint">Place <code>.md</code> test files in the <code>tests/</code> directory.</p>
+            <p data-i18n="noTestsFound">No tests found.</p>
+            <p class="catalog-empty__hint" data-i18n="noTestsHint">Place <code>.md</code> test files in the <code>tests/</code> directory.</p>
         </div>
         {% else %}
         <div class="test-grid">
@@ -78,7 +78,7 @@ function openTestModal(testId) {
     // Options
     var html = '<a href="/test/' + testId + '?mode=full" class="test-modal__option test-modal__option--full">';
     html += '<span class="test-modal__option-icon">ALL</span>';
-    html += '<div style="flex:1"><div class="test-modal__option-label">Full Test</div></div>';
+    html += '<div style="flex:1"><div class="test-modal__option-label">' + t('takeFullTest') + '</div></div>';
     html += '<span class="test-modal__option-time">' + formatTime(fullTime) + '</span>';
     html += '</a>';
 

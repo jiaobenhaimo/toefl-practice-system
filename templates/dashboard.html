@@ -9,17 +9,17 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">Analytics</h2>
+        <h2 class="page-heading" data-i18n="pageAnalytics">Analytics</h2>
 
         {% if students %}
         <div class="form-row" style="margin-bottom:20px;align-items:center">
             <select id="student-select" class="login-input" style="flex:1;max-width:320px" onchange="loadAnalytics()" aria-label="Select a student">
-                <option value="">Select a student...</option>
+                <option value="" data-i18n="student">Select a student...</option>
                 {% for s in students %}
                 <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
                 {% endfor %}
             </select>
-            <a id="student-history-link" href="#" class="btn btn--secondary" style="display:none">View full history →</a>
+            <a id="student-history-link" href="#" class="btn btn--secondary" style="display:none" data-i18n="viewFullHistory">View full history →</a>
         </div>
         {% endif %}
 
@@ -31,16 +31,16 @@
         <div id="dashboard-content" style="display:none">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
                 <div class="card">
-                    <h3 class="card__title">Score Trend</h3>
+                    <h3 class="card__title" data-i18n="scoreTrend">Score Trend</h3>
                     <canvas id="chart-trend" height="200"></canvas>
                 </div>
                 <div class="card">
-                    <h3 class="card__title">Performance by Section</h3>
+                    <h3 class="card__title" data-i18n="perfBySection">Performance by Section</h3>
                     <canvas id="chart-sections" height="200"></canvas>
                 </div>
             </div>
             <div class="card">
-                <h3 class="card__title">Areas for Improvement</h3>
+                <h3 class="card__title" data-i18n="areasImprove">Areas for Improvement</h3>
                 <div id="weakest-areas"></div>
             </div>
         </div>
@@ -86,7 +86,7 @@ function loadAnalytics() {
             document.getElementById('dashboard-content').style.display = 'none';
             document.getElementById('dashboard-empty').style.display = '';
             var emptyEl = document.getElementById('dashboard-empty');
-            emptyEl.querySelector('p').textContent = 'No test results yet.';
+            emptyEl.querySelector('p').textContent = t('noResultsYet');
             var hint = emptyEl.querySelector('.catalog-empty__hint');
             if (hint) hint.textContent = 'Complete a test and your analytics will appear here.';
             return;
@@ -148,7 +148,7 @@ function renderSectionChart(sections) {
 function renderWeakest(sections) {
     var sorted = sections.slice().filter(function(s){ return s.total > 0; }).sort(function(a,b){ return a.pct - b.pct; });
     var el = document.getElementById('weakest-areas');
-    if (!sorted.length) { el.innerHTML = '<p style="color:var(--text-muted);padding:8px 0">Not enough data yet.</p>'; return; }
+    if (!sorted.length) { el.innerHTML = '<p style="color:var(--text-muted);padding:8px 0">' + t('notEnoughData') + '</p>'; return; }
     var html = '';
     sorted.forEach(function(s) {
         var label = s.section.charAt(0).toUpperCase() + s.section.slice(1);

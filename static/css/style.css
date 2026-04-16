@@ -437,13 +437,16 @@ select.login-input { padding-right: 32px; background-image: url("data:image/svg+
 .role-toggle__btn { padding: 0 20px; font-size: 0.88rem; font-weight: 500; font-family: var(--font-body); background: var(--bg-card); color: var(--text-muted); border: none; cursor: pointer; height: 44px; min-height: 44px; transition: all 0.15s; }
 .role-toggle__btn:hover { background: var(--bg-hover); }
 .role-toggle__btn--active { background: var(--accent); color: #fff; font-weight: 600; }
+.role-toggle__btn--student.role-toggle__btn--active { background: var(--accent); }
+.role-toggle__btn--teacher.role-toggle__btn--active { background: var(--listening); }
+.role-toggle__btn--parent.role-toggle__btn--active { background: var(--amber); }
 .role-toggle__btn + .role-toggle__btn { border-left: 1px solid var(--border); }
 .flash-msg { background: var(--accent-dim); color: var(--accent); padding: 12px 16px; border-radius: var(--radius-sm); font-size: 0.88rem; margin-bottom: 16px; }
 
 /* ===== PAGINATION ===== */
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 20px 0 4px; }
 .pagination__info { font-size: 0.88rem; color: var(--text-muted); }
-.btn--sm { height: 36px; min-height: 36px; padding: 0 14px; font-size: 0.88rem; }
+.btn--sm { height: 44px; min-height: 44px; padding: 0 16px; font-size: 0.88rem; }
 .role-badge { font-size: 0.71rem; font-weight: 700; padding: 3px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0; }
 .role-badge--admin { background: var(--red-dim); color: var(--red); }
 .role-badge--teacher { background: rgba(175,82,222,0.1); color: var(--listening); }
@@ -553,7 +556,7 @@ a.progress-row:hover { background: var(--bg-hover); }
 .user-table tbody tr:last-child td { border-bottom: none; }
 .user-table tbody tr:hover { background: var(--bg-hover); }
 .user-table__actions { display: flex; align-items: center; justify-content: flex-end; gap: 0; white-space: nowrap; }
-.user-table__actions .btn--icon { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+.user-table__actions .btn--icon { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 
 /* ===== REVIEW QUEUE ===== */
 .review-passage { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; font-size: 0.88rem; line-height: 1.6; max-height: 200px; overflow-y: auto; margin-bottom: 16px; }

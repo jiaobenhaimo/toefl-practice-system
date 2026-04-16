@@ -119,6 +119,166 @@
             correct: '正确！',
             incorrect: '错误',
             correctAnswer: '正确答案：{a}',
+
+            // ===== Page-level UI (all templates except test/review) =====
+
+            // Nav sidebar
+            navAssignments: '作业',
+            navTestLibrary: '考试库',
+            navAnalytics: '数据分析',
+            navHistory: '历史记录',
+            navReview: '复习',
+            navSubmissions: '提交记录',
+            navProgress: '进度追踪',
+            navUsers: '用户管理',
+            navMyChild: '我的孩子',
+            navAccount: '账户',
+            navLogOut: '退出登录',
+            navLogIn: '登录',
+            navGuest: '访客',
+
+            // Page headings
+            pageAssignments: '作业',
+            pageTestLibrary: '考试库',
+            pageAnalytics: '数据分析',
+            pageHistory: '历史记录',
+            pageReviewQueue: '复习队列',
+            pageSubmissions: '提交记录',
+            pageProgress: '进度追踪',
+            pageUsers: '用户管理',
+            pageAccount: '账户设置',
+            pageParent: '家长面板',
+
+            // Login page
+            loginTitle: '登录',
+            loginUsername: '用户名',
+            loginPassword: '密码',
+            loginRemember: '记住我',
+            loginSubmit: '登录',
+            loginGuest: '以访客身份继续',
+            loginGuestNote: '访客可以练习，但成绩不会保存。',
+            loginError: '用户名或密码错误',
+
+            // Catalog
+            noTestsFound: '未找到考试。',
+            noTestsHint: '请将 .md 考试文件放入 tests/ 目录。',
+            fullTest: '完整考试',
+
+            // Assignments
+            browseAllTests: '浏览所有考试',
+            noTestsAssigned: '还没有分配考试。',
+            noTestsAssignedHint: '老师分配考试后将显示在此处。',
+            startReview: '开始复习 →',
+            assigned: '分配于',
+            due: '截止',
+
+            // History / Results
+            scoreTrend: '成绩趋势',
+            perfBySection: '各部分表现',
+            areasImprove: '需要改进的方面',
+            loadingDots: '加载中…',
+            incompleteAssignments: '未完成的作业',
+            noResultsYet: '还没有成绩。',
+            noResultsHint: '完成一次考试后，成绩将显示在此处。',
+            notEnoughData: '数据不足。',
+            colTest: '考试',
+            colSection: '部分',
+            colDueDate: '截止日期',
+            colFullTest: '完整考试',
+            colType: '类型',
+            colScore: '成绩',
+            colDate: '日期',
+            colPractice: '练习',
+            colAssigned: '已分配',
+            colRemove: '移除',
+            backToProgress: '← 返回进度追踪',
+            viewFullHistory: '查看完整记录 →',
+            page: '第',
+            of: '页，共',
+            pages: '页',
+            previous: '上一页',
+            nextPage: '下一页',
+
+            // Teacher submissions
+            allStudents: '所有学生',
+            exportCSV: '导出 CSV',
+            exportPDF: '导出 PDF',
+
+            // Teacher progress
+            liveSessions: '实时会话',
+            checking: '正在检查...',
+            noActiveSessions: '目前没有活动会话。',
+            remaining: '剩余',
+            assignTest: '分配考试',
+            student: '学生...',
+            test: '考试...',
+            sectionReading: '阅读',
+            sectionListening: '听力',
+            sectionWriting: '写作',
+            sectionSpeaking: '口语',
+            assign: '分配',
+            noStudentsFound: '未找到学生。',
+
+            // Admin - User management
+            createUser: '创建用户',
+            username: '用户名',
+            displayName: '显示名称',
+            defaultPassword: '默认密码：',
+            bulkImport: '批量导入',
+            import_: '导入',
+            announcement: '公告',
+            dismiss: '关闭',
+            typeAnnouncement: '输入公告内容...',
+            post: '发布',
+            allUsers: '所有用户',
+            colRole: '角色',
+            colUser: '用户',
+            colCreated: '创建时间',
+            confirmNewUser: '确认创建用户',
+            create: '创建',
+            cancel: '取消',
+            editUser: '编辑用户',
+            loginNameLabel: '登录用户名',
+            displayNameLabel: '显示名称',
+            roleLabel: '角色',
+            resetPassword: '重置密码为',
+            save: '保存',
+            linkToStudent: '关联学生...',
+
+            // Account
+            changePassword: '修改密码',
+            currentPassword: '当前密码',
+            newPassword: '新密码',
+            confirmPassword: '确认新密码',
+            updatePassword: '更新密码',
+
+            // Review queue
+            noReviewNow: '目前没有需要复习的题目。',
+            noReviewHint: '考试中做错的题目将出现在此处进行间隔重复练习。',
+            allDoneToday: '今天的复习全部完成！',
+            comeBackTomorrow: '明天再来复习吧。',
+            failedLoadReview: '加载复习队列失败。',
+            fillBlank: '填空：',
+            wordsLabel: '词语：',
+            check: '检查',
+            correctBang: '✓ 正确！',
+            incorrectX: '✗ 错误',
+            correctAnswerIs: '正确答案：',
+            nextArrow: '下一题 →',
+            question: '第',
+            ofTotal: '题，共',
+            questionsTotal: '题',
+            interval: '间隔：',
+            day: '天',
+            days: '天',
+
+            // Parent
+            noStudentLinked: '您的账户未关联学生。',
+            noStudentHint: '请联系老师或管理员关联您的账户。',
+
+            // Misc
+            practice: '练习',
+            guest: '访客',
         }
     };
     // Detect language
@@ -139,6 +299,24 @@
         localStorage.setItem('lang', window._lang);
         location.reload();
     }
+    // Translate elements with data-i18n attribute on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('[data-i18n]').forEach(function(el) {
+            var key = el.getAttribute('data-i18n');
+            var val = t(key);
+            if (val && val !== key) el.textContent = val;
+        });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
+            var key = el.getAttribute('data-i18n-placeholder');
+            var val = t(key);
+            if (val && val !== key) el.placeholder = val;
+        });
+        document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
+            var key = el.getAttribute('data-i18n-title');
+            var val = t(key);
+            if (val && val !== key) el.title = val;
+        });
+    });
     </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}

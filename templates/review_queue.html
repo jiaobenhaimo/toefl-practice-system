@@ -5,15 +5,15 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main" style="max-width:680px">
-        <h2 class="page-heading">Review Queue</h2>
+        <h2 class="page-heading" data-i18n="pageReviewQueue">Review Queue</h2>
 
         <div id="review-empty" class="catalog-empty" style="display:none">
-            <p>No questions to review right now.</p>
-            <p class="catalog-empty__hint">Questions you get wrong on tests will appear here for spaced repetition practice.</p>
+            <p data-i18n="noReviewNow">No questions to review right now.</p>
+            <p class="catalog-empty__hint" data-i18n="noReviewHint">Questions you get wrong on tests will appear here for spaced repetition practice.</p>
         </div>
 
         <div id="review-loading" class="catalog-empty">
-            <p>Loading...</p>
+            <p data-i18n="loadingDots">Loading...</p>
         </div>
 
         <div id="review-card" class="card" style="display:none">
@@ -31,7 +31,7 @@
                 <div id="review-cloze-prompt" style="font-size:1rem;margin-bottom:16px"></div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <input type="text" id="review-cloze-input" class="login-input" style="flex:1" placeholder="Type your answer..." autocomplete="off">
-                    <button class="btn btn--primary" onclick="submitCloze()">Check</button>
+                    <button class="btn btn--primary" onclick="submitCloze()" data-i18n="check">Check</button>
                 </div>
             </div>
 
@@ -41,7 +41,7 @@
                 <div id="review-build-words" style="font-size:1rem;font-weight:500;margin-bottom:16px"></div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <input type="text" id="review-build-input" class="login-input" style="flex:1" placeholder="Type the sentence..." autocomplete="off">
-                    <button class="btn btn--primary" onclick="submitBuild()">Check</button>
+                    <button class="btn btn--primary" onclick="submitBuild()" data-i18n="check">Check</button>
                 </div>
             </div>
 
@@ -52,13 +52,13 @@
             </div>
 
             <div id="review-actions" style="display:none;margin-top:20px;gap:8px;justify-content:flex-end">
-                <button class="btn btn--primary" onclick="nextReview()">Next →</button>
+                <button class="btn btn--primary" onclick="nextReview()" data-i18n="nextArrow">Next →</button>
             </div>
         </div>
 
         <div id="review-done" class="catalog-empty" style="display:none">
-            <p>All done for today!</p>
-            <p class="catalog-empty__hint">Come back tomorrow for more review.</p>
+            <p data-i18n="allDoneToday">All done for today!</p>
+            <p class="catalog-empty__hint" data-i18n="comeBackTomorrow">Come back tomorrow for more review.</p>
         </div>
     </main>
 </div>
@@ -82,7 +82,7 @@ function loadQueue() {
         }
         showQuestion();
     }).catch(function() {
-        document.getElementById('review-loading').innerHTML = '<p style="color:var(--red)">Failed to load review queue.</p>';
+        document.getElementById('review-loading').innerHTML = '<p style="color:var(--red)">' + t('failedLoadReview') + '</p>';
     });
 }
 
@@ -99,7 +99,7 @@ function showQuestion() {
     document.getElementById('review-card').style.display = '';
     document.getElementById('review-feedback').style.display = 'none';
     document.getElementById('review-actions').style.display = 'none';
-    document.getElementById('review-progress').textContent = 'Question ' + (_currentIdx + 1) + ' of ' + _queue.length + '  ·  Interval: ' + _currentItem.interval_days + ' day' + (_currentItem.interval_days > 1 ? 's' : '');
+    document.getElementById('review-progress').textContent = t('question') + (_currentIdx + 1) + ' ' + t('ofTotal') + ' ' + _queue.length + t('questionsTotal') + '  ·  ' + t('interval') + _currentItem.interval_days + ' ' + t('days');
 
     // Hide all type panels
     document.getElementById('review-mc').style.display = 'none';
@@ -142,7 +142,7 @@ function showFeedback(correct, detail) {
     var fb = document.getElementById('review-feedback');
     fb.style.display = '';
     fb.style.background = correct ? 'var(--green-dim)' : 'var(--red-dim)';
-    document.getElementById('review-feedback-text').textContent = correct ? '✓ Correct!' : '✗ Incorrect';
+    document.getElementById('review-feedback-text').textContent = correct ? t('correctBang') : t('incorrectX');
     document.getElementById('review-feedback-text').style.color = correct ? 'var(--green)' : 'var(--red)';
     document.getElementById('review-feedback-detail').textContent = detail;
     document.getElementById('review-actions').style.display = 'flex';
@@ -165,7 +165,7 @@ function submitMC(key) {
         if (k === key && !correct) btn.classList.add('review-choice--wrong');
         btn.disabled = true;
     });
-    showFeedback(correct, correct ? '' : 'Correct answer: ' + qd.answer);
+    showFeedback(correct, correct ? '' : t('correctAnswerIs') + qd.answer);
 }
 
 function submitCloze() {
@@ -174,7 +174,7 @@ function submitCloze() {
     var qd = _currentItem.question_data || {};
     var expected = qd.fill || '';
     var correct = input.toLowerCase() === expected.toLowerCase();
-    showFeedback(correct, correct ? '' : 'Correct: ' + (qd.full_word || expected));
+    showFeedback(correct, correct ? '' : t('correctAnswerIs') + (qd.full_word || expected));
 }
 
 function submitBuild() {
@@ -183,7 +183,7 @@ function submitBuild() {
     var expected = (_currentItem.correct_answer || '').trim();
     var norm = function(s) { return s.toLowerCase().replace(/[?!.]/g, ''); };
     var correct = norm(input) === norm(expected);
-    showFeedback(correct, correct ? '' : 'Correct: ' + expected);
+    showFeedback(correct, correct ? '' : t('correctAnswerIs') + expected);
 }
 
 function nextReview() {

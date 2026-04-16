@@ -6,7 +6,7 @@ import os, json, copy, time, re, markdown, yaml
 from pathlib import Path
 from functools import wraps
 from flask import session, request, redirect, abort, g
-from parser import scan_tests_directory, parse_test_file, build_question_list
+from parser import scan_tests_directory, parse_test_file
 import database as db
 
 # ===== Config =====

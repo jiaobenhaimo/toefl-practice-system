@@ -5,7 +5,7 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main">
-        <h2 class="page-heading">Progress Tracking</h2>
+        <h2 class="page-heading" data-i18n="pageProgress">Progress Tracking</h2>
 
         {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -21,24 +21,24 @@
                 <span style="font-weight:400;font-size:0.82rem;color:var(--text-muted)" id="live-count"></span>
             </h3>
             <div id="live-sessions">
-                <p style="color:var(--text-muted);font-size:0.88rem">Checking...</p>
+                <p style="color:var(--text-muted);font-size:0.88rem" data-i18n="checking">Checking...</p>
             </div>
         </div>
 
         {% if progress and tests %}
         <div class="card" style="margin-bottom:20px">
-            <h3 class="card__title">Assign Test</h3>
+            <h3 class="card__title" data-i18n="assignTest">Assign Test</h3>
             <form method="POST" action="/teacher/assign" style="display:flex;flex-direction:column;gap:10px">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <div class="form-row">
                     <select name="student_id" required class="login-input" style="flex:1" aria-label="Student">
-                        <option value="">Student...</option>
+                        <option value="" data-i18n="student">Student...</option>
                         {% for p in progress %}
                         <option value="{{ p.student.id }}">{{ p.student.display_name }} (@{{ p.student.username }})</option>
                         {% endfor %}
                     </select>
                     <select name="test_id" required class="login-input" style="flex:1" aria-label="Test">
-                        <option value="">Test...</option>
+                        <option value="" data-i18n="test">Test...</option>
                         {% for tid, t in tests.items() %}
                         <option value="{{ tid }}">{{ t.test_name }}</option>
                         {% endfor %}
@@ -46,14 +46,14 @@
                 </div>
                 <div class="form-row">
                     <select name="section" class="login-input" style="flex:1" aria-label="Section">
-                        <option value="">Full test</option>
-                        <option value="reading">Reading</option>
-                        <option value="listening">Listening</option>
-                        <option value="writing">Writing</option>
-                        <option value="speaking">Speaking</option>
+                        <option value="" data-i18n="colFullTest">Full test</option>
+                        <option value="reading" data-i18n="sectionReading">Reading</option>
+                        <option value="listening" data-i18n="sectionListening">Listening</option>
+                        <option value="writing" data-i18n="sectionWriting">Writing</option>
+                        <option value="speaking" data-i18n="sectionSpeaking">Speaking</option>
                     </select>
                     <input type="date" name="due_date" class="login-input" style="flex:1" title="Due date (optional)" aria-label="Due date">
-                    <button type="submit" class="btn btn--primary">Assign</button>
+                    <button type="submit" class="btn btn--primary" data-i18n="assign">Assign</button>
                 </div>
             </form>
         </div>
@@ -61,7 +61,7 @@
 
         {% if not progress %}
         <div class="catalog-empty">
-            <p>No students found.</p>
+            <pdata-i18n="noStudentsFound">No students found.</p>
         </div>
         {% else %}
         <div class="results-list">
@@ -102,7 +102,7 @@ function renderLiveSessions(sessions) {
     var dot = document.getElementById('live-dot');
     var countEl = document.getElementById('live-count');
     if (!sessions.length) {
-        el.innerHTML = '<p style="color:var(--text-muted);font-size:0.88rem">No active sessions right now.</p>';
+        el.innerHTML = '<p style="color:var(--text-muted);font-size:0.88rem">' + t('noActiveSessions') + '</p>';
         dot.className = 'live-dot';
         countEl.textContent = '';
         return false;
@@ -115,11 +115,11 @@ function renderLiveSessions(sessions) {
         html += '<div class="live-session-card">';
         html += '<div class="live-session-card__name">' + esc(s.student_name) + '</div>';
         html += '<div class="live-session-card__test">' + esc(s.test_name);
-        if (s.practice) html += ' <span class="practice-badge">PRACTICE</span>';
+        if (s.practice) html += ' <span class="practice-badge">' + t('practice') + '</span>';
         html += '</div>';
         html += '<div class="live-session-card__detail">' + esc(s.module) + ' · Page ' + s.current_page + '/' + s.total_pages + '</div>';
         html += '<div class="live-session-card__bar"><div class="live-session-card__fill" style="width:' + progress + '%"></div></div>';
-        html += '<div class="live-session-card__timer">' + formatTimer(s.timer_left) + ' remaining</div>';
+        html += '<div class="live-session-card__timer">' + formatTimer(s.timer_left) + ' ' + t('remaining') + '</div>';
         html += '</div>';
     });
     html += '</div>';

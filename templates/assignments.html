@@ -5,20 +5,21 @@
 <div class="layout">
     {% include "nav.html" %}
     <main class="layout__main" style="display:flex;flex-direction:column">
-        <h2 class="page-heading">Assignments</h2>
+        <h2 class="page-heading" data-i18n="pageAssignments">Assignments</h2>
 
         <!-- Review banner (populated via JS) -->
         <div class="review-banner" id="review-banner" style="display:none">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v7l5 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
             <span id="review-banner-text"></span>
-            <a href="/review-queue">Start Review →</a>
+            <a href="/review-queue" data-i18n="startReview">Start Review →</a>
         </div>
         <script>
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/review-count').then(function(r) { return r.json(); }).then(function(data) {
                 if (data.count > 0) {
                     document.getElementById('review-banner').style.display = '';
-                    document.getElementById('review-banner-text').textContent = 'You have ' + data.count + ' question' + (data.count > 1 ? 's' : '') + ' to review.';
+                    var msg = (I18N[window._lang] || {}).reviewBanner || 'You have {n} question(s) to review.';
+                    document.getElementById('review-banner-text').textContent = msg.replace('{n}', data.count);
                 }
             }).catch(function() {});
         });
@@ -26,8 +27,8 @@
 
         {% if not assignments %}
         <div class="catalog-empty">
-            <p>No tests assigned to you yet.</p>
-            <p class="catalog-empty__hint">Your teacher will assign tests when they're ready.</p>
+            <p data-i18n="noTestsAssigned">No tests assigned to you yet.</p>
+            <p class="catalog-empty__hint" data-i18n="noTestsAssignedHint">Your teacher will assign tests when they're ready.</p>
         </div>
         {% else %}
         <div class="test-grid">
@@ -53,10 +54,10 @@
                     {% endif %}
                 </div>
                 <div class="assignment-card__meta">
-                    Assigned {{ a.assigned_at|fmtdate }}
+                    <span data-i18n="assigned">Assigned</span> {{ a.assigned_at|fmtdate }}
                     {% if a.due_date %}
                     <br>
-                    <span style="color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})">Due {{ a.due_date|fmtdate }}</span>
+                    <span style="color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})"><span data-i18n="due">Due</span> {{ a.due_date|fmtdate }}</span>
                     {% endif %}
                 </div>
             </a>
@@ -66,7 +67,7 @@
         {% endif %}
 
         <div style="margin-top:auto;padding-top:32px;padding-bottom:16px">
-            <a href="/catalog" class="btn btn--secondary">Browse All Tests</a>
+            <a href="/catalog" class="btn btn--secondary" data-i18n="browseAllTests">Browse All Tests</a>
         </div>
     </main>
 </div>
