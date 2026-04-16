@@ -1,6 +1,6 @@
 /* ===== TOKENS ===== */
 :root {
-    --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
     --font-mono: 'SF Mono', 'Menlo', 'Consolas', ui-monospace, monospace;
 
     --bg: #f2f2f7;
@@ -78,7 +78,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 
 /* ===== LAYOUT (SIDEBAR + CONTENT) ===== */
 .layout { display: flex; min-height: 100vh; }
-.layout__main { flex: 1; padding: 32px 40px; width: 100%; }
+.layout__main { flex: 1; padding: 32px 40px; width: 100%; max-width: 1200px; }
 
 /* ===== SIDEBAR ===== */
 .sidebar { width: 260px; flex-shrink: 0; background: var(--bg-raised); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; z-index: 200; }
@@ -475,7 +475,7 @@ a.progress-row:hover { background: var(--bg-hover); }
 .progress-row__bar-wrap { flex: 1; }
 .progress-row__bar { height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden; }
 .progress-row__fill { height: 100%; background: var(--green); border-radius: 4px; transition: width 0.3s; min-width: 2px; }
-.progress-row__stat { min-width: 80px; text-align: right; font-family: var(--font-mono); font-size: 0.85rem; color: var(--text); }
+.progress-row__stat { min-width: 100px; text-align: right; font-family: var(--font-mono); font-size: 0.85rem; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ===== ANNOUNCEMENT BANNER ===== */
 .announcement-banner { background: var(--accent-dim); border-bottom: 1px solid var(--accent); padding: 10px 20px 10px 20px; margin-left: 260px; font-size: 0.88rem; color: var(--accent); display: flex; align-items: center; gap: 8px; }

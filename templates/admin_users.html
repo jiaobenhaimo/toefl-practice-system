@@ -23,9 +23,9 @@
                 </div>
                 <div class="form-row" style="align-items:center">
                     <div class="role-toggle" id="role-toggle">
-                        <button type="button" class="role-toggle__btn role-toggle__btn--active role-toggle__btn--student" data-role="student" onclick="selectRole(this)">Student</button>
-                        <button type="button" class="role-toggle__btn role-toggle__btn--teacher" data-role="teacher" onclick="selectRole(this)">Teacher</button>
-                        <button type="button" class="role-toggle__btn role-toggle__btn--parent" data-role="parent" onclick="selectRole(this)">Parent</button>
+                        <button type="button" class="role-toggle__btn role-toggle__btn--active role-toggle__btn--student" data-role="student" onclick="selectRole(this)" data-i18n-role="student">Student</button>
+                        <button type="button" class="role-toggle__btn role-toggle__btn--teacher" data-role="teacher" onclick="selectRole(this)" data-i18n-role="teacher">Teacher</button>
+                        <button type="button" class="role-toggle__btn role-toggle__btn--parent" data-role="parent" onclick="selectRole(this)" data-i18n-role="parent">Parent</button>
                     </div>
                     <input type="hidden" name="role" id="cf-role" value="student">
                     <select name="linked_student_id" id="cf-linked-student" class="login-input" style="display:none;flex:0.8">
@@ -37,7 +37,6 @@
                     <div style="flex:1"></div>
                     <button type="submit" class="btn btn--primary" data-i18n="createUser">Create User</button>
                 </div>
-                <div style="font-size:0.82rem;color:var(--text-muted);margin-top:8px"><span data-i18n="defaultPassword">Default password:</span> <strong>12345678</strong></div>
             </form>
         </div>
 
@@ -83,18 +82,18 @@
                 <tbody>
                     {% for u in users %}
                     <tr>
-                        <td><span class="role-badge role-badge--{{ u.role }}">{{ u.role }}</span></td>
+                        <td><span class="role-badge role-badge--{{ u.role }}" data-i18n-role="{{ u.role }}">{{ u.role }}</span></td>
                         <td><strong>{{ u.display_name }}</strong> <span style="color:var(--text-dim)">@{{ u.username }}</span></td>
-                        <td style="color:var(--text-muted)">{{ u.created_at|fmtdate }}</td>
+                        <td style="color:var(--text-muted)"><span data-i18n-date="{{ u.created_at }}">{{ u.created_at|fmtdate }}</span></td>
                         <td>
                             {% if u.id != user.id %}
                             <div class="user-table__actions">
                                 <button class="btn btn--icon" onclick="openEditModal({{ u.id }}, {{ u.display_name|tojson }}, {{ u.username|tojson }}, {{ u.role|tojson }})" title="Edit" aria-label="Edit" style="color:var(--accent)">
                                     <svg width="16" height="16" viewBox="0 0 20 20"><path d="M12.5 4.5l3 3L7 16H4v-3L12.5 4.5z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
                                 </button>
-                                <form method="POST" action="/admin/users/{{ u.id }}/delete" style="display:inline;margin:0" onsubmit="return confirm('Delete {{ u.username }}?')">
+                                <form method="POST" action="/admin/users/{{ u.id }}/delete" style="display:inline;margin:0" id="del-form-{{ u.id }}">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                                    <button type="submit" class="btn btn--icon" title="Delete" aria-label="Delete" style="color:var(--red)">
+                                    <button type="button" class="btn btn--icon" title="Delete" aria-label="Delete" style="color:var(--red)" onclick="showConfirm(t('confirmDeleteTitle'), t('confirmDeleteMsg') + ' {{ u.display_name }}?', t('confirmDeleteBtn'), function(){ document.getElementById('del-form-{{ u.id }}').submit(); })">
                                         <svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                                     </button>
                                 </form>
@@ -140,15 +139,15 @@
             <div>
                 <label style="font-size:0.82rem;color:var(--text-muted);display:block;margin-bottom:4px" data-i18n="roleLabel">Role</label>
                 <div class="role-toggle" id="edit-role-toggle">
-                    <button type="button" class="role-toggle__btn role-toggle__btn--student" data-role="student" onclick="selectEditRole(this)">Student</button>
-                    <button type="button" class="role-toggle__btn role-toggle__btn--teacher" data-role="teacher" onclick="selectEditRole(this)">Teacher</button>
-                    <button type="button" class="role-toggle__btn role-toggle__btn--parent" data-role="parent" onclick="selectEditRole(this)">Parent</button>
+                    <button type="button" class="role-toggle__btn role-toggle__btn--student" data-role="student" onclick="selectEditRole(this)" data-i18n-role="student">Student</button>
+                    <button type="button" class="role-toggle__btn role-toggle__btn--teacher" data-role="teacher" onclick="selectEditRole(this)" data-i18n-role="teacher">Teacher</button>
+                    <button type="button" class="role-toggle__btn role-toggle__btn--parent" data-role="parent" onclick="selectEditRole(this)" data-i18n-role="parent">Parent</button>
                 </div>
                 <input type="hidden" name="role" id="edit-role" value="student">
             </div>
             <label style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;font-size:0.88rem">
                 <input type="checkbox" name="reset_password" value="on" id="edit-reset-pw" style="width:20px;height:20px;accent-color:var(--accent)">
-                Reset password to <strong>12345678</strong>
+                <span data-i18n="resetPassword">Reset password to</span> <strong>12345678</strong>
             </label>
             <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
                 <button type="button" class="btn btn--secondary" onclick="closeModal('edit-overlay')" data-i18n="cancel">Cancel</button>

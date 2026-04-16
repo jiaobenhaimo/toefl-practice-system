@@ -43,21 +43,21 @@
                 <div class="assignment-card__info">
                     <div class="assignment-card__name">{{ t.test_name }}</div>
                     {% if a.section %}
-                    <span class="module-chip module-chip--{{ a.section }}">{{ a.section|capitalize }}</span>
+                    <span class="module-chip module-chip--{{ a.section }}" data-i18n-section="{{ a.section }}">{{ a.section|capitalize }}</span>
                     {% else %}
                     <div class="assignment-card__sections">
                         {% set sections = t.modules | map(attribute='section') | unique | list %}
                         {% for sec in sections %}
-                        <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
+                        <span class="module-chip module-chip--{{ sec }}" data-i18n-section="{{ sec }}">{{ sec|capitalize }}</span>
                         {% endfor %}
                     </div>
                     {% endif %}
                 </div>
                 <div class="assignment-card__meta">
-                    <span data-i18n="assigned">Assigned</span> {{ a.assigned_at|fmtdate }}
+                    <span data-i18n="assigned">Assigned</span> <span data-i18n-date="{{ a.assigned_at }}">{{ a.assigned_at|fmtdate }}</span>
                     {% if a.due_date %}
                     <br>
-                    <span style="color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})"><span data-i18n="due">Due</span> {{ a.due_date|fmtdate }}</span>
+                    <span style="color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})"><span data-i18n="due">Due</span> <span data-i18n-date="{{ a.due_date }}">{{ a.due_date|fmtdate }}</span></span>
                     {% endif %}
                 </div>
             </a>

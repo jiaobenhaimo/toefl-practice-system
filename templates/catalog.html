@@ -19,7 +19,7 @@
                     <div class="test-card__modules-preview">
                             {% set sections = test.modules | map(attribute='section') | unique | list %}
                             {% for sec in sections %}
-                            <span class="module-chip module-chip--{{ sec }}">{{ sec|capitalize }}</span>
+                            <span class="module-chip module-chip--{{ sec }}" data-i18n-section="{{ sec }}">{{ sec|capitalize }}</span>
                             {% endfor %}
                     </div>
                 </div>
@@ -67,7 +67,7 @@ function openTestModal(testId) {
         if (sections.indexOf(m.section) === -1) sections.push(m.section);
     });
     var chipsHtml = sections.map(function(s) {
-        return '<span class="module-chip module-chip--' + s + '">' + s.charAt(0).toUpperCase() + s.slice(1) + '</span>';
+        return '<span class="module-chip module-chip--' + s + '">' + tSection(s) + '</span>';
     }).join('');
     document.getElementById('modal-chips').innerHTML = chipsHtml;
 
@@ -89,7 +89,7 @@ function openTestModal(testId) {
         test.modules.forEach(function(m) { if (m.section === sec) totalTime += m.timer_minutes; });
         html += '<a href="/test/' + testId + '?mode=section&section=' + sec + '" class="test-modal__option">';
         html += '<span class="test-modal__option-icon" style="color:var(--' + sec + ')">' + sec.charAt(0).toUpperCase() + '</span>';
-        html += '<div style="flex:1"><div class="test-modal__option-label">' + sec.charAt(0).toUpperCase() + sec.slice(1) + '</div></div>';
+        html += '<div style="flex:1"><div class="test-modal__option-label">' + tSection(sec) + '</div></div>';
         html += '<span class="test-modal__option-time">' + formatTime(totalTime) + '</span>';
         html += '</a>';
     });

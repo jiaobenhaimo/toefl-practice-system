@@ -75,7 +75,7 @@
         {% if user %}
         <div class="sidebar__user">
             <span class="sidebar__user-name">{{ user.display_name }}</span>
-            {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}">{{ user.role }}</span>{% endif %}
+            {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}" data-i18n-role="{{ user.role }}">{{ user.role }}</span>{% endif %}
         </div>
         <a href="/account" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Account settings">
             <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>

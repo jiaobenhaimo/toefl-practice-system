@@ -24,7 +24,8 @@
                 {% if students %}
                 <form method="POST" action="/teacher/export" style="margin-left:auto;display:flex;gap:8px;align-items:center">
                     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                    <select name="student_ids" multiple class="login-input" style="height:auto;min-height:44px;max-width:200px;padding:6px 10px;font-size:0.82rem" title="Hold Ctrl/Cmd to select">
+                    <select name="student_ids" class="login-input" style="max-width:220px">
+                        <option value="" data-i18n="exportStudent">Select student to export...</option>
                         {% for s in students %}
                         <option value="{{ s.id }}">{{ s.display_name }}</option>
                         {% endfor %}
@@ -59,7 +60,7 @@
                         <td>
                             {% if r.total_questions > 0 %}{{ r.total_correct }}/{{ r.total_questions }}{% endif %}
                         </td>
-                        <td style="color:var(--text-dim)">{{ r.date|fmtdate }}</td>
+                        <td style="color:var(--text-dim)"><span data-i18n-date="{{ r.date }}">{{ r.date|fmtdate }}</span></td>
                         <td class="user-table__actions" onclick="event.stopPropagation()">
                             <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF">
                                 <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>

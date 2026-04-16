@@ -10,7 +10,7 @@
     {% include "nav.html" %}
     <main class="layout__main">
         {% if view_user and view_user.id != user.id %}
-        <a href="/teacher/progress" class="back-link" data-i18n="backToProgress">>&larr; Back to Progress Tracking</a>larr; Back to Progress Tracking</a>
+        <a href="/teacher/progress" class="back-link" data-i18n="backToProgress">&larr; Back to Progress Tracking</a>
         <h2 class="page-heading">{{ view_user.display_name }}</h2>
         {% else %}
         <h2 class="page-heading" data-i18n="pageHistory">Result History</h2>
@@ -102,14 +102,14 @@
                         <td><strong>{{ t.test_name if t else a.test_id }}</strong></td>
                         <td>
                             {% if a.section %}
-                            <span class="module-chip module-chip--{{ a.section }}">{{ a.section|capitalize }}</span>
+                            <span class="module-chip module-chip--{{ a.section }}" data-i18n-section="{{ a.section }}">{{ a.section|capitalize }}</span>
                             {% else %}
                             <span style="color:var(--text-muted)" data-i18n="colFullTest">Full test</span>
                             {% endif %}
                         </td>
                         <td>
                             {% if a.due_date %}
-                            <span style="color:var(--{% if a.due_date < now_date %}red{% else %}text-muted{% endif %})">{{ a.due_date|fmtdate }}</span>
+                            <span style="color:var(--{% if a.due_date < now_date %}red{% else %}text-muted{% endif %})"><span data-i18n-date="{{ a.due_date }}">{{ a.due_date|fmtdate }}</span></span>
                             {% else %}
                             <span style="color:var(--text-dim)">—</span>
                             {% endif %}
@@ -163,7 +163,7 @@
                             ({{ (r.total_correct / r.total_questions * 100)|round|int }}%)
                             {% endif %}
                         </td>
-                        <td style="color:var(--text-dim)">{{ r.date|fmtdate }}</td>
+                        <td style="color:var(--text-dim)"><span data-i18n-date="{{ r.date }}">{{ r.date|fmtdate }}</span></td>
                         <td class="user-table__actions" onclick="event.stopPropagation()">
                             <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF" onclick="return confirmPdfExport(event, this.href)">
                                 <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>

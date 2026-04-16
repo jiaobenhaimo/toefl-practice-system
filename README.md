@@ -28,6 +28,8 @@ python app.py
 
 Open `http://localhost:8080`. Default login: `admin` / `admin`. **Change this immediately** at `/admin/users`.
 
+New user accounts created by an admin are assigned the default password `12345678`. Users should change their password immediately after first login via the Account page.
+
 Python 3.9+ required. Works on macOS, Linux, and Windows. Speaking questions need HTTPS (or localhost) for microphone access.
 
 ### Production

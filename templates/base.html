@@ -159,18 +159,23 @@
             loginGuestNote: '访客可以练习，但成绩不会保存。',
             loginError: '用户名或密码错误',
 
-            // Catalog
+            // Catalog + section names
             noTestsFound: '未找到考试。',
             noTestsHint: '请将 .md 考试文件放入 tests/ 目录。',
             fullTest: '完整考试',
+            Reading: '阅读',
+            Listening: '听力',
+            Writing: '写作',
+            Speaking: '口语',
 
             // Assignments
             browseAllTests: '浏览所有考试',
-            noTestsAssigned: '还没有分配考试。',
-            noTestsAssignedHint: '老师分配考试后将显示在此处。',
+            noTestsAssigned: '还没有布置考试。',
+            noTestsAssignedHint: '老师布置考试后将显示在此处。',
             startReview: '开始复习 →',
-            assigned: '分配于',
+            assigned: '布置于',
             due: '截止',
+            reviewBanner: '你有 {n} 道题需要复习。',
 
             // History / Results
             scoreTrend: '成绩趋势',
@@ -189,13 +194,10 @@
             colScore: '成绩',
             colDate: '日期',
             colPractice: '练习',
-            colAssigned: '已分配',
+            colAssigned: '已布置',
             colRemove: '移除',
             backToProgress: '← 返回进度追踪',
             viewFullHistory: '查看完整记录 →',
-            page: '第',
-            of: '页，共',
-            pages: '页',
             previous: '上一页',
             nextPage: '下一页',
 
@@ -203,27 +205,33 @@
             allStudents: '所有学生',
             exportCSV: '导出 CSV',
             exportPDF: '导出 PDF',
+            exportStudent: '选择学生导出...',
 
             // Teacher progress
             liveSessions: '实时会话',
             checking: '正在检查...',
             noActiveSessions: '目前没有活动会话。',
             remaining: '剩余',
-            assignTest: '分配考试',
+            assignTest: '布置考试',
             student: '学生...',
             test: '考试...',
             sectionReading: '阅读',
             sectionListening: '听力',
             sectionWriting: '写作',
             sectionSpeaking: '口语',
-            assign: '分配',
+            assign: '布置',
             noStudentsFound: '未找到学生。',
+
+            // Roles
+            roleAdmin: '管理员',
+            roleTeacher: '教师',
+            roleStudent: '学生',
+            roleParent: '家长',
 
             // Admin - User management
             createUser: '创建用户',
             username: '用户名',
             displayName: '显示名称',
-            defaultPassword: '默认密码：',
             bulkImport: '批量导入',
             import_: '导入',
             announcement: '公告',
@@ -244,6 +252,14 @@
             resetPassword: '重置密码为',
             save: '保存',
             linkToStudent: '关联学生...',
+            confirmDeleteTitle: '确认删除',
+            confirmDeleteMsg: '确定要删除用户',
+            confirmDeleteBtn: '删除',
+
+            // Dashboard
+            selectStudent: '选择一个学生...',
+            selectStudentHint: '请选择一个学生查看数据分析。',
+            selectStudentHintEmpty: '完成考试后数据分析将显示在此处。',
 
             // Account
             changePassword: '修改密码',
@@ -265,11 +281,10 @@
             incorrectX: '✗ 错误',
             correctAnswerIs: '正确答案：',
             nextArrow: '下一题 →',
-            question: '第',
-            ofTotal: '题，共',
-            questionsTotal: '题',
+            question: '第 ',
+            ofTotal: ' 题，共 ',
+            questionsTotal: ' 题',
             interval: '间隔：',
-            day: '天',
             days: '天',
 
             // Parent
@@ -279,6 +294,9 @@
             // Misc
             practice: '练习',
             guest: '访客',
+
+            // Date format (month names)
+            monthNames: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
         }
     };
     // Detect language
@@ -316,7 +334,84 @@
             var val = t(key);
             if (val && val !== key) el.title = val;
         });
+        // Translate dates: elements with data-i18n-date="YYYY-MM-DD"
+        if (window._lang === 'zh') {
+            document.querySelectorAll('[data-i18n-date]').forEach(function(el) {
+                var d = el.getAttribute('data-i18n-date');
+                if (d && d.length >= 10) {
+                    var y = d.slice(0,4), m = parseInt(d.slice(5,7)), day = parseInt(d.slice(8,10));
+                    el.textContent = y + '年' + m + '月' + day + '日';
+                }
+            });
+        }
+        // Translate role badges
+        document.querySelectorAll('[data-i18n-role]').forEach(function(el) {
+            var role = el.getAttribute('data-i18n-role');
+            el.textContent = tRole(role);
+        });
+        // Translate section chips
+        document.querySelectorAll('[data-i18n-section]').forEach(function(el) {
+            var sec = el.getAttribute('data-i18n-section');
+            el.textContent = tSection(sec);
+        });
     });
+    // Helper: translate role name
+    function tRole(role) {
+        var map = {admin: t('roleAdmin'), teacher: t('roleTeacher'), student: t('roleStudent'), parent: t('roleParent')};
+        return map[role] || role;
+    }
+    // Helper: translate section name
+    function tSection(sec) {
+        var cap = sec.charAt(0).toUpperCase() + sec.slice(1);
+        var val = t(cap);
+        return (val !== cap) ? val : cap;
+    }
+    // Helper: format date for current language
+    function fmtDateI18n(dateStr) {
+        if (!dateStr || dateStr.length < 10) return dateStr || '';
+        var y = dateStr.slice(0,4), m = parseInt(dateStr.slice(5,7)), d = parseInt(dateStr.slice(8,10));
+        if (window._lang === 'zh') return y + '年' + m + '月' + d + '日';
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return months[m-1] + ' ' + d + ', ' + y;
+    }
+    // Unified HIG confirmation dialog
+    function showConfirm(title, message, confirmText, onConfirm) {
+        var existing = document.getElementById('hig-confirm-overlay');
+        if (existing) existing.remove();
+        var overlay = document.createElement('div');
+        overlay.id = 'hig-confirm-overlay';
+        overlay.className = 'test-modal-overlay test-modal-overlay--active';
+        overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+        var modal = document.createElement('div');
+        modal.className = 'test-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.style.maxWidth = '360px';
+        var h3 = document.createElement('h3');
+        h3.className = 'test-modal__title';
+        h3.textContent = title;
+        modal.appendChild(h3);
+        var p = document.createElement('p');
+        p.style.cssText = 'margin:16px 0;font-size:0.95rem;line-height:1.5;color:var(--text)';
+        p.textContent = message;
+        modal.appendChild(p);
+        var btns = document.createElement('div');
+        btns.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
+        var cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn--secondary';
+        cancelBtn.textContent = t('cancel');
+        cancelBtn.onclick = function() { overlay.remove(); };
+        var confirmBtn = document.createElement('button');
+        confirmBtn.className = 'btn btn--primary';
+        confirmBtn.style.background = 'var(--red)';
+        confirmBtn.textContent = confirmText;
+        confirmBtn.onclick = function() { overlay.remove(); onConfirm(); };
+        btns.appendChild(cancelBtn);
+        btns.appendChild(confirmBtn);
+        modal.appendChild(btns);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        confirmBtn.focus();
+    }
     </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}

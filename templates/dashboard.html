@@ -14,7 +14,7 @@
         {% if students %}
         <div class="form-row" style="margin-bottom:20px;align-items:center">
             <select id="student-select" class="login-input" style="flex:1;max-width:320px" onchange="loadAnalytics()" aria-label="Select a student">
-                <option value="" data-i18n="student">Select a student...</option>
+                <option value="" data-i18n="selectStudent">Select a student...</option>
                 {% for s in students %}
                 <option value="{{ s.id }}">{{ s.display_name }} (@{{ s.username }})</option>
                 {% endfor %}
@@ -24,8 +24,8 @@
         {% endif %}
 
         <div id="dashboard-empty" class="catalog-empty" {% if not students %}style="display:none"{% endif %}>
-            <p>{% if students %}Select a student above to view analytics.{% else %}No test results yet.{% endif %}</p>
-            <p class="catalog-empty__hint">{% if students %}Choose a student to see their score trends and weakest areas.{% else %}Complete a test and your analytics will appear here.{% endif %}</p>
+            <p {% if students %}data-i18n="selectStudentHint"{% else %}data-i18n="noResultsYet"{% endif %}>{% if students %}Select a student above to view analytics.{% else %}No test results yet.{% endif %}</p>
+            <p class="catalog-empty__hint" {% if students %}data-i18n="selectStudentHintEmpty"{% else %}data-i18n="noResultsHint"{% endif %}>{% if students %}Choose a student to see their score trends and weakest areas.{% else %}Complete a test and your analytics will appear here.{% endif %}</p>
         </div>
 
         <div id="dashboard-content" style="display:none">

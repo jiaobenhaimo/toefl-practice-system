@@ -17,7 +17,7 @@
         <div class="card" style="margin-bottom:20px" id="live-card">
             <h3 class="card__title">
                 <span class="live-dot" id="live-dot"></span>
-                Live Sessions
+                <span data-i18n="liveSessions">Live Sessions</span>
                 <span style="font-weight:400;font-size:0.82rem;color:var(--text-muted)" id="live-count"></span>
             </h3>
             <div id="live-sessions">
@@ -28,30 +28,28 @@
         {% if progress and tests %}
         <div class="card" style="margin-bottom:20px">
             <h3 class="card__title" data-i18n="assignTest">Assign Test</h3>
-            <form method="POST" action="/teacher/assign" style="display:flex;flex-direction:column;gap:10px">
+            <form method="POST" action="/teacher/assign" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
                 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                <div class="form-row">
-                    <select name="student_id" required class="login-input" style="flex:1" aria-label="Student">
-                        <option value="" data-i18n="student">Student...</option>
-                        {% for p in progress %}
-                        <option value="{{ p.student.id }}">{{ p.student.display_name }} (@{{ p.student.username }})</option>
-                        {% endfor %}
-                    </select>
-                    <select name="test_id" required class="login-input" style="flex:1" aria-label="Test">
-                        <option value="" data-i18n="test">Test...</option>
-                        {% for tid, t in tests.items() %}
-                        <option value="{{ tid }}">{{ t.test_name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="form-row">
-                    <select name="section" class="login-input" style="flex:1" aria-label="Section">
-                        <option value="" data-i18n="colFullTest">Full test</option>
-                        <option value="reading" data-i18n="sectionReading">Reading</option>
-                        <option value="listening" data-i18n="sectionListening">Listening</option>
-                        <option value="writing" data-i18n="sectionWriting">Writing</option>
-                        <option value="speaking" data-i18n="sectionSpeaking">Speaking</option>
-                    </select>
+                <select name="student_id" required class="login-input" aria-label="Student">
+                    <option value="" data-i18n="student">Student...</option>
+                    {% for p in progress %}
+                    <option value="{{ p.student.id }}">{{ p.student.display_name }} (@{{ p.student.username }})</option>
+                    {% endfor %}
+                </select>
+                <select name="test_id" required class="login-input" aria-label="Test">
+                    <option value="" data-i18n="test">Test...</option>
+                    {% for tid, t in tests.items() %}
+                    <option value="{{ tid }}">{{ t.test_name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="section" class="login-input" aria-label="Section">
+                    <option value="" data-i18n="colFullTest">Full test</option>
+                    <option value="reading" data-i18n="sectionReading">Reading</option>
+                    <option value="listening" data-i18n="sectionListening">Listening</option>
+                    <option value="writing" data-i18n="sectionWriting">Writing</option>
+                    <option value="speaking" data-i18n="sectionSpeaking">Speaking</option>
+                </select>
+                <div style="display:flex;gap:10px">
                     <input type="date" name="due_date" class="login-input" style="flex:1" title="Due date (optional)" aria-label="Due date">
                     <button type="submit" class="btn btn--primary" data-i18n="assign">Assign</button>
                 </div>
