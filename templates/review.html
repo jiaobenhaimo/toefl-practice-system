@@ -21,7 +21,7 @@
                 <div class="test-header__section" id="rv-section-label">Review</div>
             </div>
             <div class="test-header__right">
-                <span id="rv-score" style="font-size:0.88rem;font-weight:600;color:var(--text-muted)"></span>
+                <select id="rv-module-select" class="login-input" style="font-size:0.82rem;height:36px;min-height:36px;max-width:240px;padding:0 28px 0 10px" onchange="jumpToModuleSelect()" aria-label="Jump to module"></select>
             </div>
         </header>
 
@@ -46,11 +46,61 @@
 <script>
 var RESULT_ID = {{ result.id }};
 var USER_ROLE = {{ user.role|tojson }};
+var USER_ID = {{ user.id }};
 var BACK_URL = {% if user.role in ('admin','teacher') %}'/teacher/results'{% elif user.role == 'parent' %}'/parent'{% else %}'/history'{% endif %};
 var _data = null;
 var _allPages = [];
 var _pageIdx = 0;
-var _sectionBreaks = []; // Indices where a new section starts
+var _sectionBreaks = [];
+var _isAuthTeacher = false; // Set from API response
+
+// Rubric descriptors from official ETS TOEFL iBT scoring guides
+var RUBRIC_DESCRIPTORS = {
+    listen_repeat: {
+        name: 'Listen & Repeat',
+        scores: {
+            5: 'The response exactly repeats the prompt. Fully intelligible.',
+            4: 'Captures meaning but not an exact repetition. Minor word/grammar changes that don\'t substantially change meaning.',
+            3: 'Essentially full but does not accurately capture original meaning. Multiple function words may be changed or missing.',
+            2: 'Missing a significant part of the prompt and/or is highly inaccurate. Intelligibility is low.',
+            1: 'Captures very little of the prompt or is largely unintelligible.',
+            0: 'No response, entirely unintelligible, or entirely unconnected to the prompt.'
+        }
+    },
+    interview: {
+        name: 'Take an Interview',
+        scores: {
+            5: 'Fully successful. On topic, well elaborated. Good pace, easily intelligible pronunciation. Accurate grammar and vocabulary.',
+            4: 'Generally successful. On topic and elaborated. Good pace with some pausing. Intelligibility not impeded. Adequate grammar/vocabulary.',
+            3: 'Partially successful. Generally on topic but limited elaboration. Frequent pauses, choppy pace. Limited grammar and vocabulary range.',
+            2: 'Mostly unsuccessful. Minimally connected to the question. Limited intelligibility. Very limited grammar and vocabulary.',
+            1: 'Unsuccessful. Only vaguely connected. Mostly unintelligible. Isolated words or phrases.',
+            0: 'No response, entirely unintelligible, or entirely unconnected to the prompt.'
+        }
+    },
+    email: {
+        name: 'Write an Email',
+        scores: {
+            5: 'Fully successful. Effective, clearly expressed. Effective syntactic variety, precise word choice. Consistent social conventions. Almost no errors.',
+            4: 'Generally successful. Mostly effective and easily understood. Adequate elaboration, syntactic variety. Few errors.',
+            3: 'Partially successful. Generally accomplishes the task. Elaboration partially supports purpose. Moderate syntax/vocabulary range. Some noticeable errors.',
+            2: 'Mostly unsuccessful. Attempt to address task but mostly ineffective. Limited or irrelevant elaboration. Accumulation of errors.',
+            1: 'Unsuccessful. Ineffective attempt. Very little elaboration. Telegraphic language. Serious and frequent errors.',
+            0: 'Blank, rejects topic, not in English, or entirely copied from prompt.'
+        }
+    },
+    discussion: {
+        name: 'Write for Academic Discussion',
+        scores: {
+            5: 'Fully successful. Relevant and very clearly expressed contribution. Well-elaborated explanations/details. Effective syntax, precise word choice.',
+            4: 'Generally successful. Relevant contribution, easily understood. Adequately elaborated. Variety of syntactic structures. Few errors.',
+            3: 'Partially successful. Mostly relevant and understandable. Part of elaboration may be missing/unclear. Some variety in syntax. Noticeable errors.',
+            2: 'Mostly unsuccessful. Attempt to contribute but ideas may be hard to follow. Limited syntactic range. Accumulation of errors.',
+            1: 'Unsuccessful. Ineffective attempt. Few/no coherent ideas. Severely limited range. Serious frequent errors.',
+            0: 'Blank, rejects topic, not in English, or entirely copied from prompt.'
+        }
+    }
+};
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -63,6 +113,7 @@ async function loadReview() {
         document.getElementById('review-loading').innerHTML = '<div class="loading-msg">Failed to load review data.</div>';
         return;
     }
+    _isAuthTeacher = _data.is_authorized_teacher || false;
     _allPages = [];
     _sectionBreaks = [];
     var lastSection = '';
@@ -82,9 +133,54 @@ async function loadReview() {
     }
     document.getElementById('review-loading').classList.remove('screen--active');
     document.getElementById('review-main').classList.add('screen--active');
+    buildModuleDropdown();
     buildSummary();
     buildDots();
+    // Load TOEFL band scores
+    loadBandScores();
     renderPage();
+}
+
+function buildModuleDropdown() {
+    var sel = document.getElementById('rv-module-select');
+    sel.innerHTML = '';
+    _data.modules.forEach(function(mod, mi) {
+        var opt = document.createElement('option');
+        opt.value = mi;
+        var label = mod.section.charAt(0).toUpperCase() + mod.section.slice(1) + ' M' + mod.module;
+        opt.textContent = label;
+        sel.appendChild(opt);
+    });
+}
+
+var _bandScores = {};
+async function loadBandScores() {
+    try {
+        var resp = await fetch('/api/toefl-scores/' + RESULT_ID);
+        var data = await resp.json();
+        _bandScores = data;
+        // Update dropdown labels with band scores
+        var sel = document.getElementById('rv-module-select');
+        _data.modules.forEach(function(mod, mi) {
+            var band = (data.section_bands || {})[mod.section];
+            if (band !== undefined && band !== null) {
+                var label = mod.section.charAt(0).toUpperCase() + mod.section.slice(1) + ' M' + mod.module + ' — ' + band.toFixed(1);
+                sel.options[mi].textContent = label;
+            }
+        });
+        // Update summary with band scores
+        buildSummary();
+    } catch (e) {}
+}
+
+function jumpToModuleSelect() {
+    var mi = parseInt(document.getElementById('rv-module-select').value);
+    // Find first page of this module
+    for (var i = 0; i < _allPages.length; i++) {
+        if (_allPages[i].moduleIdx === mi) {
+            _pageIdx = i; renderPage(); return;
+        }
+    }
 }
 
 function buildSummary() {
@@ -93,15 +189,25 @@ function buildSummary() {
     if (!sums.length) { el.style.display = 'none'; return; }
     var html = '';
     sums.forEach(function(s) {
-        var pct = s.total > 0 ? Math.round(s.correct / s.total * 100) : 0;
         var label = s.section.charAt(0).toUpperCase() + s.section.slice(1);
         if (sums.length > 1) label += ' M' + s.moduleNum;
+        var band = (_bandScores.section_bands || {})[s.section];
         html += '<div class="review-summary__item" data-section="' + s.section + '" data-module="' + s.moduleNum + '" onclick="jumpToSection(\'' + s.section + '\',' + s.moduleNum + ')" style="cursor:pointer">';
         html += '<span class="review-summary__label" style="color:var(--' + s.section + ')">' + label + '</span>';
-        html += '<span class="review-summary__score">' + s.correct + '/' + s.total;
-        if (s.total > 0) html += ' (' + pct + '%)';
-        html += '</span></div>';
+        if (band !== undefined && band !== null) {
+            html += '<span class="review-summary__score" style="font-weight:700;color:var(--accent)">' + band.toFixed(1) + '</span>';
+        } else if (s.total > 0) {
+            html += '<span class="review-summary__score">' + s.correct + '/' + s.total + '</span>';
+        }
+        html += '</div>';
     });
+    // Overall band
+    if (_bandScores.overall !== undefined && _bandScores.overall !== null) {
+        html += '<div class="review-summary__item" style="background:var(--accent-dim);border:1px solid var(--accent)">';
+        html += '<span class="review-summary__label" style="color:var(--accent);font-weight:700">Overall</span>';
+        html += '<span class="review-summary__score" style="font-weight:700;color:var(--accent);font-size:1rem">' + _bandScores.overall.toFixed(1) + '</span>';
+        html += '</div>';
+    }
     // Show overall teacher comment if present
     var overall = _data.comments && _data.comments._overall;
     if (overall && overall.comment) {
@@ -131,9 +237,26 @@ function buildDots() {
         var dot = document.createElement('span');
         dot.className = 'progress-dot';
         var g = item.page.graded || {};
-        if (g.correct === true) dot.classList.add('progress-dot--correct');
-        else if (g.correct === false) dot.classList.add('progress-dot--wrong');
-        else dot.classList.add('progress-dot--answered');
+        var pg = item.page;
+        if (pg.question_type === 'cloze') {
+            // Cloze: check all sub-questions — red if ANY wrong, green only if ALL correct
+            var clozeDetails = pg.cloze_details || [];
+            var allCorrect = clozeDetails.length > 0;
+            var anyWrong = false;
+            clozeDetails.forEach(function(d) {
+                if (d.correct === false) anyWrong = true;
+                if (d.correct !== true) allCorrect = false;
+            });
+            if (anyWrong) dot.classList.add('progress-dot--wrong');
+            else if (allCorrect) dot.classList.add('progress-dot--correct');
+            else dot.classList.add('progress-dot--answered');
+        } else if (g.correct === true) {
+            dot.classList.add('progress-dot--correct');
+        } else if (g.correct === false) {
+            dot.classList.add('progress-dot--wrong');
+        } else {
+            dot.classList.add('progress-dot--answered');
+        }
         dot.setAttribute('data-idx', i);
         dot.onclick = function() { _pageIdx = i; renderPage(); };
         dot.style.cursor = 'pointer';
@@ -161,16 +284,11 @@ function renderPage() {
     body.scrollTop = 0;
     window.scrollTo(0, 0);
 
-    // Header
+    // Update header section label
     document.getElementById('rv-section-label').textContent =
         item.section.charAt(0).toUpperCase() + item.section.slice(1) + ' — Module ' + item.module;
-    var scoreEl = document.getElementById('rv-score');
-    if (g.correct === true) scoreEl.innerHTML = '<span style="color:var(--green)">✓ Correct</span>';
-    else if (g.correct === false) scoreEl.innerHTML = '<span style="color:var(--red)">✗ Wrong</span>';
-    else if (g.type === 'email' || g.type === 'discussion') scoreEl.innerHTML = '<span style="color:var(--text-muted)">' + (g.wordCount || 0) + ' words</span>';
-    else if (g.type === 'listen_repeat' || g.type === 'interview') scoreEl.innerHTML = '<span style="color:var(--text-muted)">' + (g.hasRecording ? 'Recorded' : 'No recording') + '</span>';
-    else scoreEl.textContent = '';
-    if (g.time) scoreEl.innerHTML += ' <span style="color:var(--text-dim);margin-left:8px">' + g.time + 's</span>';
+    // Update dropdown selection
+    document.getElementById('rv-module-select').value = item.moduleIdx;
 
     // Group title
     if (pg.group_title) body.appendChild(mkEl('div', 'group-label', pg.group_title));
@@ -182,6 +300,27 @@ function renderPage() {
     else if (pg.question_type === 'email' || pg.question_type === 'discussion') renderWriteReview(body, pg, g);
     else if (pg.question_type === 'listen_repeat' || pg.question_type === 'interview') renderSpeakReview(body, pg, g);
 
+    // Score indicator — BELOW the question content
+    var scoreHtml = '';
+    if (g.correct === true) scoreHtml = '<span style="color:var(--green)">✓ Correct</span>';
+    else if (g.correct === false) scoreHtml = '<span style="color:var(--red)">✗ Wrong</span>';
+    else if (g.type === 'email' || g.type === 'discussion') scoreHtml = '<span style="color:var(--text-muted)">' + (g.wordCount || 0) + ' words</span>';
+    else if (g.type === 'listen_repeat' || g.type === 'interview') scoreHtml = '<span style="color:var(--text-muted)">' + (g.hasRecording ? 'Recorded' : 'No recording') + '</span>';
+    if (g.time) scoreHtml += ' <span style="color:var(--text-dim);margin-left:8px">' + g.time + 's</span>';
+    if (scoreHtml) {
+        var scoreBar = mkEl('div', '', '');
+        scoreBar.style.cssText = 'padding:10px 16px;margin-top:12px;border-radius:var(--radius-sm);background:var(--bg-input);font-size:0.9rem;font-weight:600';
+        scoreBar.innerHTML = scoreHtml;
+        body.appendChild(scoreBar);
+    }
+
+    // Rubric grading UI for speaking/writing (teachers only)
+    var isRubricType = (pg.question_type === 'email' || pg.question_type === 'discussion' ||
+                        pg.question_type === 'listen_repeat' || pg.question_type === 'interview');
+    if (isRubricType) {
+        renderRubricGrading(body, pg, qid);
+    }
+
     // Explanation
     var expl = _data.explanations[qid];
     if (expl) {
@@ -190,34 +329,35 @@ function renderPage() {
         body.appendChild(box);
     }
 
-    // Per-question teacher comment
+    // Per-question teacher comment (visible to all if submitted)
     var cmt = _data.comments[qid];
-    if (cmt && cmt.comment) {
+    if (cmt && cmt.comment && !cmt.comment.match(/^\d$/) /* skip rubric-only entries */) {
         var box = mkEl('div', 'review-panel review-panel--comment');
         box.innerHTML = '<strong>Teacher</strong><div style="margin-top:6px">' + esc(cmt.comment) + '</div><div style="font-size:0.82rem;color:var(--text-dim);margin-top:4px">— ' + esc(cmt.teacher || '') + '</div>';
         body.appendChild(box);
     }
 
-    // Note + teacher comment input
-    var noteVal = _data.notes[qid] || '';
-    var noteBox = mkEl('div', 'review-panel review-panel--note');
-    noteBox.innerHTML = '<strong>My Notes</strong>';
-    var ta = document.createElement('textarea');
-    ta.className = 'note-area'; ta.placeholder = 'Add a note…'; ta.rows = 3; ta.value = noteVal;
-    (function(capturedQid) {
-        ta.onblur = function() {
-            fetch('/api/notes/' + RESULT_ID, {
-                method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({question_id: capturedQid, note: ta.value.trim()})
-            });
-            _data.notes[capturedQid] = ta.value.trim();
-        };
-    })(qid);
-    noteBox.appendChild(ta);
-
-    if (USER_ROLE === 'admin' || USER_ROLE === 'teacher') {
-        var tcBox = mkEl('div', '');
-        tcBox.innerHTML = '<strong style="display:block;margin-top:12px;font-size:0.88rem;color:var(--listening)">Add Teacher Comment</strong>';
+    // Notes section — students write student notes, authorized teachers write teacher comments
+    if (USER_ROLE === 'student') {
+        var noteVal = _data.notes[qid] || '';
+        var noteBox = mkEl('div', 'review-panel review-panel--note');
+        noteBox.innerHTML = '<strong>My Notes</strong>';
+        var ta = document.createElement('textarea');
+        ta.className = 'note-area'; ta.placeholder = 'Add a note…'; ta.rows = 3; ta.value = noteVal;
+        (function(capturedQid) {
+            ta.onblur = function() {
+                fetch('/api/notes/' + RESULT_ID, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({question_id: capturedQid, note: ta.value.trim()})
+                });
+                _data.notes[capturedQid] = ta.value.trim();
+            };
+        })(qid);
+        noteBox.appendChild(ta);
+        body.appendChild(noteBox);
+    } else if (_isAuthTeacher || USER_ROLE === 'admin') {
+        var tcBox = mkEl('div', 'review-panel review-panel--note');
+        tcBox.innerHTML = '<strong style="color:var(--listening)">Teacher Comment</strong>';
         var tca = document.createElement('textarea');
         tca.className = 'note-area'; tca.style.borderColor = 'var(--listening)';
         tca.placeholder = 'Teacher comment…'; tca.rows = 2;
@@ -234,14 +374,191 @@ function renderPage() {
             };
         })(qid);
         tcBox.appendChild(tca);
-        noteBox.appendChild(tcBox);
+        body.appendChild(tcBox);
     }
-    body.appendChild(noteBox);
 
     // Nav
     document.getElementById('rv-prev').style.display = _pageIdx > 0 ? '' : 'none';
     document.getElementById('rv-next').textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Done';
     updateDots();
+}
+
+/* ======= RUBRIC GRADING ======= */
+function renderRubricGrading(body, pg, qid) {
+    var rubricKey = '_rubric_' + qid;
+    var existingScore = _data.comments[rubricKey];
+    var currentScore = existingScore ? parseInt(existingScore.comment) : -1;
+    var isSubmitted = existingScore ? existingScore.submitted === 1 : false;
+    var rubricType = pg.question_type; // 'email', 'discussion', 'listen_repeat', 'interview'
+    var descriptors = RUBRIC_DESCRIPTORS[rubricType];
+    if (!descriptors) return;
+
+    // For students: only show score if submitted
+    if (USER_ROLE === 'student' || USER_ROLE === 'parent') {
+        if (isSubmitted && currentScore >= 0) {
+            var scoreBox = mkEl('div', 'review-panel');
+            scoreBox.style.cssText = 'background:var(--accent-dim);border:1px solid var(--accent);margin-top:12px';
+            scoreBox.innerHTML = '<strong style="color:var(--accent)">Rubric Score: ' + currentScore + '/5</strong>' +
+                '<div style="margin-top:4px;font-size:0.88rem;color:var(--text-muted)">' + esc(descriptors.scores[currentScore] || '') + '</div>';
+            body.appendChild(scoreBox);
+        }
+        return;
+    }
+
+    // For unauthorized teachers: show score read-only if submitted
+    if (USER_ROLE === 'teacher' && !_isAuthTeacher) {
+        if (isSubmitted && currentScore >= 0) {
+            var scoreBox = mkEl('div', 'review-panel');
+            scoreBox.style.cssText = 'background:var(--bg-input);border:1px solid var(--border);margin-top:12px';
+            scoreBox.innerHTML = '<strong>Rubric Score: ' + currentScore + '/5</strong>' +
+                '<div style="margin-top:4px;font-size:0.88rem;color:var(--text-muted)">' + esc(descriptors.scores[currentScore] || '') + '</div>';
+            body.appendChild(scoreBox);
+        }
+        return;
+    }
+
+    // Authorized teacher / admin: full grading UI
+    var container = mkEl('div', 'rubric-grading');
+    container.style.cssText = 'margin-top:16px;padding:16px;border-radius:var(--radius);border:1.5px solid var(--listening);background:rgba(175,82,222,0.04)';
+    var header = mkEl('div', '', '<strong style="color:var(--listening)">' + esc(descriptors.name) + ' — Rubric Scoring</strong>');
+    header.style.marginBottom = '12px';
+    container.appendChild(header);
+
+    // Score buttons 0-5
+    var btnRow = mkEl('div', '', '');
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap';
+    for (var s = 5; s >= 0; s--) {
+        var btn = document.createElement('button');
+        btn.className = 'btn ' + (s === currentScore ? 'btn--primary' : 'btn--secondary');
+        btn.style.cssText = 'min-width:44px;height:44px;font-size:1rem;font-weight:700';
+        if (s === currentScore) btn.style.background = 'var(--listening)';
+        btn.textContent = s;
+        btn.setAttribute('data-score', s);
+        btn.onclick = (function(score, qid_) {
+            return function() {
+                // Auto-save on click (draft)
+                fetch('/api/rubric-score/' + RESULT_ID, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({question_id: qid_, score: score})
+                });
+                // Update local state
+                if (!_data.comments['_rubric_' + qid_]) _data.comments['_rubric_' + qid_] = {};
+                _data.comments['_rubric_' + qid_].comment = String(score);
+                _data.comments['_rubric_' + qid_].submitted = 0;
+                // Re-render
+                renderPage();
+            };
+        })(s, qid);
+        btnRow.appendChild(btn);
+    }
+    container.appendChild(btnRow);
+
+    // Show descriptor for current or hovered score
+    var descEl = mkEl('div', '', '');
+    descEl.style.cssText = 'font-size:0.85rem;color:var(--text-muted);line-height:1.5;min-height:40px';
+    if (currentScore >= 0) {
+        descEl.innerHTML = '<strong style="color:var(--text)">' + currentScore + '/5:</strong> ' + esc(descriptors.scores[currentScore] || '');
+    } else {
+        descEl.textContent = 'Click a score above to grade this response.';
+    }
+    container.appendChild(descEl);
+
+    // Per-question status indicator
+    if (currentScore >= 0) {
+        var statusEl = mkEl('div', '', '');
+        statusEl.style.cssText = 'font-size:0.82rem;margin-top:6px';
+        if (isSubmitted) {
+            statusEl.innerHTML = '<span style="color:var(--green)">✓ Published</span>';
+        } else {
+            statusEl.innerHTML = '<span style="color:var(--amber)">Draft — not yet visible to student</span>';
+        }
+        container.appendChild(statusEl);
+    }
+
+    // Submit button removed from per-question — now handled by module-level "Publish Scores" button below
+
+    body.appendChild(container);
+
+    // Module-level "Publish Scores" button: appears if ANY draft rubric scores exist in this module
+    renderModulePublishButton(body);
+}
+
+function renderModulePublishButton(body) {
+    // Remove any existing publish bar
+    var existing = document.getElementById('module-publish-bar');
+    if (existing) existing.remove();
+
+    if (USER_ROLE === 'student' || USER_ROLE === 'parent') return;
+    if (!_isAuthTeacher && USER_ROLE !== 'admin') return;
+
+    // Count draft + total rubric questions in the current module
+    var item = _allPages[_pageIdx];
+    var currentSection = item.section;
+    var currentModule = item.module;
+    var draftCount = 0, totalRubricQs = 0, submittedCount = 0;
+    _allPages.forEach(function(p) {
+        if (p.section !== currentSection || p.module !== currentModule) return;
+        var qt = p.page.question_type;
+        if (qt === 'email' || qt === 'discussion' || qt === 'listen_repeat' || qt === 'interview') {
+            totalRubricQs++;
+            var rubricKey = '_rubric_' + p.page.question_id;
+            var entry = _data.comments[rubricKey];
+            if (entry && entry.comment !== undefined) {
+                if (entry.submitted === 0) draftCount++;
+                else if (entry.submitted === 1) submittedCount++;
+            }
+        }
+    });
+
+    if (totalRubricQs === 0) return;
+
+    var bar = mkEl('div', '', '');
+    bar.id = 'module-publish-bar';
+    bar.style.cssText = 'margin-top:16px;padding:14px 16px;border-radius:var(--radius);background:var(--bg-input);border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap';
+
+    var moduleLabel = currentSection.charAt(0).toUpperCase() + currentSection.slice(1) + ' M' + currentModule;
+
+    if (draftCount > 0) {
+        var status = mkEl('span', '', '');
+        status.style.cssText = 'font-size:0.85rem;color:var(--text-muted);flex:1';
+        status.textContent = draftCount + ' unpublished score(s) in ' + moduleLabel;
+        bar.appendChild(status);
+        var pubBtn = document.createElement('button');
+        pubBtn.className = 'btn btn--primary';
+        pubBtn.style.cssText = 'background:var(--listening);white-space:nowrap';
+        pubBtn.textContent = 'Publish Scores';
+        pubBtn.onclick = function() {
+            pubBtn.disabled = true;
+            pubBtn.textContent = 'Publishing...';
+            fetch('/api/rubric-submit/' + RESULT_ID, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({module_label: moduleLabel})
+            }).then(function() {
+                // Mark all draft scores for this module as submitted locally
+                _allPages.forEach(function(p) {
+                    if (p.section !== currentSection || p.module !== currentModule) return;
+                    var rubricKey = '_rubric_' + p.page.question_id;
+                    if (_data.comments[rubricKey] && _data.comments[rubricKey].submitted === 0) {
+                        _data.comments[rubricKey].submitted = 1;
+                    }
+                });
+                loadBandScores();
+                renderPage();
+            });
+        };
+        bar.appendChild(pubBtn);
+    } else if (submittedCount > 0) {
+        var status = mkEl('span', '', '');
+        status.style.cssText = 'font-size:0.85rem;color:var(--green);font-weight:600';
+        status.textContent = '✓ All rubric scores published for ' + moduleLabel + ' (' + submittedCount + '/' + totalRubricQs + ')';
+        bar.appendChild(status);
+    } else {
+        var status = mkEl('span', '', '');
+        status.style.cssText = 'font-size:0.85rem;color:var(--text-dim)';
+        status.textContent = '0/' + totalRubricQs + ' rubric questions scored in ' + moduleLabel;
+        bar.appendChild(status);
+    }
+    body.appendChild(bar);
 }
 
 function rvNext() {

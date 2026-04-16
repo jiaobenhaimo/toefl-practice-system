@@ -41,11 +41,11 @@
             <table class="user-table" id="submissions-table">
                 <thead>
                     <tr>
-                        <th data-i18n="student">Student</th>
+                        <th data-i18n="colStudent">Student</th>
                         <th data-i18n="colTest">Test</th>
-                        <th style="width:100px" data-i18n="colScore">Score</th>
-                        <th style="width:130px" data-i18n="colDate">Date</th>
-                        <th style="width:44px"></th>
+                        <th data-i18n="colScore">Score</th>
+                        <th data-i18n="colDate">Date</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -56,7 +56,7 @@
                             <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
                             {% if r.practice %}<span class="practice-badge">Practice</span>{% endif %}
                         </td>
-                        <td>{{ r.test_name or r.test_id }}</td>
+                        <td class="user-table__main">{{ r.test_name or r.test_id }}</td>
                         <td>
                             {% if r.total_questions > 0 %}{{ r.total_correct }}/{{ r.total_questions }}{% endif %}
                         </td>

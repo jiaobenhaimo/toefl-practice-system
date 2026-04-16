@@ -4,11 +4,18 @@ Routes, middleware, and init. Shared helpers live in helpers.py.
 """
 import os, json, secrets, re, shutil, io, csv
 from datetime import datetime as dt
+from urllib.parse import urlparse
 from flask import (
     Flask, render_template, jsonify, request, session,
     send_from_directory, abort, redirect, flash, send_file, g
 )
+from markupsafe import escape as html_escape
 from parser import build_question_list
+
+# Pre-compiled regex for grading and sanitization
+_RE_PUNCT = re.compile(r'[?!.]')
+_RE_SAFE_QID = re.compile(r'[^a-zA-Z0-9.\-]')
+
 import database as db
 from helpers import (
     SITE_CONFIG, TESTS_DIR, RECORDINGS_DIR,
@@ -18,17 +25,26 @@ from helpers import (
     fmtdate, fmtdate_full,
     check_rate_limit, record_attempt,
     lookup_band, section_band,
-    _RL_BAND_TABLE, _WRITING_BAND_TABLE, _SPEAKING_BAND_TABLE,
+    _RL_BAND_TABLE, _WRITING_BAND_TABLE,
 )
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['PERMANENT_SESSION_LIFETIME'] = 60 * 60 * 24 * 31
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB upload limit
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 @app.teardown_appcontext
 def _close_db(exc):
     db.close_conn()
+
+@app.after_request
+def _security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    return response
 
 @app.context_processor
 def inject_config():
@@ -51,7 +67,18 @@ def inject_csrf():
 
 @app.before_request
 def csrf_check():
-    if request.method == 'POST' and request.content_type != 'application/json':
+    if request.method != 'POST':
+        return
+    if request.is_json:
+        # JSON APIs: validate Origin header to prevent cross-site requests
+        origin = request.headers.get('Origin', '')
+        if origin:
+            parsed = urlparse(origin)
+            host = request.host.split(':')[0]
+            if parsed.hostname and parsed.hostname != host and parsed.hostname != 'localhost':
+                abort(403)
+    else:
+        # Form/multipart POSTs: require CSRF token
         token = request.form.get('_csrf', '')
         if not token or token != session.get('_csrf'):
             abort(403)
@@ -131,6 +158,23 @@ def api_module(filename):
     mod = parsed['modules'][mi]
     pages = pages_to_html(build_question_list(mod))
     is_practice = request.args.get('practice') == 'true'
+    # Practice mode requires login or guest session (prevents unauthenticated answer extraction)
+    if is_practice:
+        u = cur_user()
+        is_guest = session.get('guest', False)
+        if not u and not is_guest:
+            is_practice = False
+        # Security: if logged-in user has an active non-practice session for ANY test,
+        # never send practice answers (prevents answer extraction during real exams)
+        elif u:
+            conn = db.get_db()
+            active_real = conn.execute(
+                "SELECT id FROM test_sessions WHERE user_id=? AND practice=0 AND finished=0 "
+                "AND updated_at > datetime('now', '-2 hours') LIMIT 1",
+                (u['id'],)
+            ).fetchone()
+            if active_real:
+                is_practice = False
     # Strip answers for client (keep in practice mode for instant feedback)
     client_pages = []
     for p in pages:
@@ -155,6 +199,7 @@ def api_grade():
     fp = safe_path(TESTS_DIR, data.get('filename',''))
     if not fp or not os.path.exists(fp): abort(404)
     mi = data.get('module_index', 0)
+    if not isinstance(mi, int) or mi < 0: abort(400)
     ans = data.get('answers', {})
     times = data.get('times', {})
     parsed = cached_parse(fp)
@@ -182,8 +227,8 @@ def api_grade():
                     'expected':ef,'fullWord':words[i] if i<len(words) else '','time':ts if i==0 else 0})
         elif qt == 'build_sentence':
             total += 1
-            exp = re.sub(r'[?!.]','',pg.get('answer','').strip().lower())
-            usr = re.sub(r'[?!.]','',(ua or '').strip().lower())
+            exp = _RE_PUNCT.sub('',pg.get('answer','').strip().lower())
+            usr = _RE_PUNCT.sub('',(ua or '').strip().lower())
             ok = usr == exp
             if ok: correct += 1
             details.append({'qid':qid,'type':'build_sentence','correct':ok,'user':ua or '—','expected':pg.get('answer',''),'time':ts})
@@ -261,9 +306,32 @@ def api_save_results():
                 qid = str(d.get('qid', ''))
                 if qid in answer_key:
                     d.update(answer_key[qid])
+    # Re-verify correctness server-side for ALL sections (don't trust client 'correct' field)
+    # This runs even if test_id was not found — unverifiable questions get correct=None
+    for sec in sections:
+        for d in sec.get('details', []):
+            dt_ = d.get('type', '')
+            if dt_ == 'mc' and 'expected' in d:
+                d['correct'] = (d.get('user', '') == d['expected'])
+            elif dt_ == 'cloze' and 'expected' in d:
+                d['correct'] = (d.get('user', '').strip().lower() == d['expected'].lower())
+            elif dt_ == 'build_sentence' and 'expected' in d:
+                usr = _RE_PUNCT.sub('', (d.get('user', '') or '').strip().lower())
+                exp = _RE_PUNCT.sub('', d['expected'].strip().lower())
+                d['correct'] = (usr == exp)
+            elif dt_ in ('mc', 'cloze', 'build_sentence') and 'expected' not in d:
+                # Cannot verify without answer key — strip client-sent correctness
+                d['correct'] = None
+        # Recalculate per-section score from verified details
+        c = sum(1 for d in sec.get('details', []) if d.get('correct') is True)
+        t_ = sum(1 for d in sec.get('details', []) if d.get('correct') is not None)
+        sec['score'] = {'correct': c, 'total': t_}
+    # Recalculate totals server-side (ignore client-provided values)
+    total_correct = sum(sec.get('score', {}).get('correct', 0) for sec in sections)
+    total_questions = sum(sec.get('score', {}).get('total', 0) for sec in sections)
     result_id = db.save_result(u['id'], test_id, data.get('test_name',''),
-        data.get('practice',False), data.get('total_correct',0),
-        data.get('total_questions',0), json.dumps(sections))
+        data.get('practice',False), total_correct,
+        total_questions, json.dumps(sections))
     session_id = data.get('session_id')
     if session_id:
         try: db.finish_session(session_id)
@@ -418,7 +486,7 @@ def api_session_upload_recording(sid):
     for key, f in request.files.items():
         if not key.startswith('rec_'): continue
         qid = key[4:]
-        safe_qid = re.sub(r'[^a-zA-Z0-9.\-]', '_', qid)
+        safe_qid = _RE_SAFE_QID.sub('_', qid)
         ext = 'ogg'
         if f.content_type and 'webm' in f.content_type: ext = 'webm'
         elif f.content_type and 'mp4' in f.content_type: ext = 'mp4'
@@ -459,7 +527,11 @@ def take_test(test_id):
 def serve_audio(filepath):
     fp = safe_path(TESTS_DIR, filepath)
     if not fp or not os.path.exists(fp): abort(404)
-    return send_from_directory(os.path.dirname(fp), os.path.basename(fp), mimetype='audio/ogg')
+    ext = os.path.splitext(fp)[1].lower()
+    mime = {'.ogg': 'audio/ogg', '.webm': 'audio/webm', '.mp4': 'audio/mp4', '.m4a': 'audio/mp4'}.get(ext, 'audio/ogg')
+    resp = send_from_directory(os.path.dirname(fp), os.path.basename(fp), mimetype=mime)
+    resp.headers['Cache-Control'] = 'public, max-age=86400, immutable'
+    return resp
 
 # ===== Recording upload and playback =====
 
@@ -468,7 +540,7 @@ def serve_audio(filepath):
 def serve_recording(result_id, qid):
     """Serve a recording file. Teachers/admins and the student can access."""
     r = get_result_or_403(result_id)
-    safe_qid = re.sub(r'[^a-zA-Z0-9.\-]', '_', qid)
+    safe_qid = _RE_SAFE_QID.sub('_', qid)
     dest = os.path.join(RECORDINGS_DIR, str(result_id))
     if not os.path.isdir(dest): abort(404)
     # Find the file regardless of extension
@@ -549,6 +621,11 @@ def admin_edit_user(uid):
         username=new_username or None,
         password='12345678' if reset_pw else None,
         role=new_role)
+    # Update linked student for parent role
+    if new_role == 'parent':
+        linked_id = request.form.get('linked_student_id', type=int)
+        if linked_id:
+            db.update_user(uid, linked_student_id=linked_id)
     msg = 'User updated'
     if reset_pw: msg += ' (password reset to 12345678)'
     flash(msg); return redirect('/admin/users')
@@ -638,12 +715,49 @@ def teacher_assign():
 @require_role('admin','teacher')
 def teacher_remove_assignment(aid):
     """Remove a test assignment."""
+    u = cur_user()
+    # Only the primary assigning teacher or admin can remove
+    if u['role'] == 'teacher':
+        conn = db.get_db()
+        assignment = conn.execute("SELECT teacher_id FROM test_assignments WHERE id=?", (aid,)).fetchone()
+        if not assignment or assignment['teacher_id'] != u['id']:
+            abort(403)
     db.remove_assignment(aid)
     flash('Assignment removed')
-    # Redirect back to the page that initiated the removal
     referrer = request.referrer
     if referrer and referrer.startswith(request.host_url):
         return redirect(referrer)
+    return redirect('/teacher/progress')
+
+
+@app.route('/teacher/assign/<int:aid>/co-teacher', methods=['POST'])
+@require_login
+@require_role('admin','teacher')
+def teacher_add_co_teacher(aid):
+    """Add a co-teacher to an assignment. Only the primary assigner or admin can do this."""
+    u = cur_user()
+    conn = db.get_db()
+    assignment = conn.execute("SELECT * FROM test_assignments WHERE id=?", (aid,)).fetchone()
+    if not assignment: abort(404)
+    # Only the primary assigning teacher or admin can add co-teachers
+    if u['role'] == 'teacher' and assignment['teacher_id'] != u['id']:
+        abort(403)
+    co_teacher_id = request.form.get('co_teacher_id', type=int)
+    if not co_teacher_id:
+        flash('No teacher selected')
+        return redirect('/teacher/progress')
+    # Verify the co-teacher exists and is a teacher
+    co_teacher = db.get_user(co_teacher_id)
+    if not co_teacher or co_teacher['role'] not in ('teacher', 'admin'):
+        flash('Invalid teacher')
+        return redirect('/teacher/progress')
+    if co_teacher_id == assignment['teacher_id']:
+        flash('Cannot add the primary assigner as co-teacher')
+        return redirect('/teacher/progress')
+    if db.add_co_teacher(aid, co_teacher_id):
+        flash(f'Co-teacher {co_teacher["display_name"]} added')
+    else:
+        flash('Teacher is already a co-teacher for this assignment')
     return redirect('/teacher/progress')
 
 @app.route('/teacher/progress')
@@ -658,6 +772,9 @@ def teacher_progress():
         d = all_data.get(s['id'], {'assignments': [], 'completed_keys': set()})
         assignments = d['assignments']
         completed_keys = d['completed_keys']
+        # Enrich assignments with co-teacher info
+        for a in assignments:
+            a['co_teachers'] = db.get_co_teachers(a['id'])
         total = len(assignments)
         done = sum(1 for a in assignments if (a['test_id'], a.get('section')) in completed_keys)
         progress_data.append({
@@ -667,8 +784,9 @@ def teacher_progress():
             'pct': round(done / total * 100) if total > 0 else 0,
             'assignments': assignments,
         })
+    teachers = db.list_users(role='teacher')
     return render_template('teacher_progress.html', progress=progress_data, user=cur_user(),
-        tests=cached_scan())
+        tests=cached_scan(), teachers=teachers)
 
 # ===== Batch Export =====
 
@@ -780,7 +898,15 @@ def api_review_data(result_id):
         modules.append({'section': mod['section'], 'module': mod['module'], 'pages': pages})
     # Load notes, comments, explanations, recordings
     notes = db.get_notes(u['id'], result_id)
-    comments = db.get_teacher_comments(result_id)
+    # Teachers/admins who are assignment teachers see draft rubric scores
+    is_auth_teacher = False
+    authorized_teacher_ids = set()
+    if u['role'] == 'admin':
+        is_auth_teacher = True
+    elif u['role'] == 'teacher':
+        authorized_teacher_ids = db.get_assignment_teacher_ids(r['user_id'], r['test_id'])
+        is_auth_teacher = u['id'] in authorized_teacher_ids
+    comments = db.get_teacher_comments(result_id, include_drafts=is_auth_teacher)
     db_expl = db.get_explanations(r['test_id'])
     md_expl = {}
     seen = set()
@@ -796,7 +922,10 @@ def api_review_data(result_id):
                     qid = str(pg.get('question_id', ''))
                     if pg.get('explanation'):
                         md_expl[qid] = md_html(pg['explanation'])
-    explanations = {**md_expl, **db_expl}
+    # DB explanations override markdown (escape HTML to prevent stored XSS)
+    explanations = {**md_expl}
+    for qid, expl in db_expl.items():
+        explanations[qid] = md_html(str(html_escape(expl)))
     rec_dir = os.path.join(RECORDINGS_DIR, str(result_id))
     recs = [os.path.splitext(f)[0] for f in os.listdir(rec_dir)] if os.path.isdir(rec_dir) else []
     # Extract rubric scores from comments
@@ -820,7 +949,9 @@ def api_review_data(result_id):
         'explanations': explanations, 'recordings': recs, 'result_id': result_id,
         'section_summaries': section_summaries,
         'student_name': r.get('display_name') or r.get('username') or '',
-        'assigning_teacher_ids': [a['teacher_id'] for a in db.get_assignments(student_id=r['user_id']) if a['test_id'] == r['test_id']],
+        'is_authorized_teacher': is_auth_teacher,
+        'authorized_teacher_ids': list(authorized_teacher_ids if u['role'] == 'teacher' else
+            db.get_assignment_teacher_ids(r['user_id'], r['test_id'])),
     })
 
 # ===== Rubric Scoring (Speaking/Writing) =====
@@ -828,15 +959,14 @@ def api_review_data(result_id):
 @app.route('/api/rubric-score/<int:result_id>', methods=['POST'])
 @require_login
 def api_save_rubric_score(result_id):
-    """Save a rubric score for a speaking/writing question."""
+    """Save a rubric score for a speaking/writing question (draft — not visible to student yet)."""
     u = cur_user()
     r = db.get_result_by_id(result_id)
     if not r: abort(404)
-    # Only assigning teacher or admin can score
-    if u['role'] == 'student': abort(403)
+    # Only assignment teacher (primary or co-teacher) or admin can score
+    if u['role'] == 'student' or u['role'] == 'parent': abort(403)
     if u['role'] == 'teacher':
-        assignments = db.get_assignments(student_id=r['user_id'])
-        if not any(a['teacher_id'] == u['id'] and a['test_id'] == r['test_id'] for a in assignments):
+        if not db.is_assignment_teacher(u['id'], r['user_id'], r['test_id']):
             abort(403)
     data = request.get_json()
     if not data: abort(400)
@@ -844,17 +974,44 @@ def api_save_rubric_score(result_id):
     score = data.get('score')
     if score is None or not isinstance(score, (int, float)) or score < 0 or score > 5:
         return jsonify({'ok': False, 'error': 'Score must be 0-5'}), 400
-    # Store as a special comment with _rubric_ prefix
-    db.save_teacher_comment(u['id'], result_id, f'_rubric_{qid}', str(int(score)))
+    # Store as draft (submitted=0) — teacher can see, student cannot until "Submit Scores"
+    db.save_teacher_comment(u['id'], result_id, f'_rubric_{qid}', str(int(score)), submitted=0)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/rubric-submit/<int:result_id>', methods=['POST'])
+@require_login
+def api_submit_rubric_scores(result_id):
+    """Publish rubric scores for a module — makes them visible to the student + sends notification."""
+    u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    if u['role'] == 'student' or u['role'] == 'parent': abort(403)
+    if u['role'] == 'teacher':
+        if not db.is_assignment_teacher(u['id'], r['user_id'], r['test_id']):
+            abort(403)
+    db.submit_rubric_scores(u['id'], result_id)
+    # Create notification for the student
+    data = request.get_json() or {}
+    module_label = data.get('module_label', '')
+    test_name = r.get('test_name') or r.get('test_id') or 'Test'
+    title = 'Scores Published'
+    msg = f'{u["display_name"]} published rubric scores for {test_name}'
+    if module_label:
+        msg += f' ({module_label})'
+    db.create_notification(r['user_id'], 'score_published', title, msg, f'/review/{result_id}')
     return jsonify({'ok': True})
 
 @app.route('/api/toefl-scores/<int:result_id>')
 @require_login
 def api_toefl_scores(result_id):
     """Calculate TOEFL 2026 1-6 band scores per section."""
+    u = cur_user()
     r = get_result_or_403(result_id)
     sections = parse_json(r['sections_json'])
-    comments = db.get_teacher_comments(result_id)
+    # Teachers/admins see draft rubric scores; students only see submitted ones
+    is_teacher = u['role'] in ('admin', 'teacher')
+    comments = db.get_teacher_comments(result_id, include_drafts=is_teacher)
     rubric_map = {}
     for key, val in comments.items():
         if key.startswith('_rubric_'):
@@ -961,12 +1118,12 @@ def api_analytics(uid):
     section_totals = {}
     section_correct = {}
     for r in results:
+        sections = parse_json(r['sections_json'])
         if r['total_questions'] > 0:
             pct = round(r['total_correct'] / r['total_questions'] * 100)
             # Calculate band from auto-graded sections
-            secs = parse_json(r['sections_json'])
             bands = []
-            for sec in secs:
+            for sec in sections:
                 s = sec.get('section', '')
                 sc = sec.get('score', {})
                 if s in ('reading', 'listening') and sc.get('total', 0) > 0:
@@ -974,7 +1131,6 @@ def api_analytics(uid):
                     bands.append(band)
             avg_band = round(sum(bands) / len(bands) * 2) / 2 if bands else None
             score_history.append({'date': r['date'][:10], 'pct': pct, 'band': avg_band, 'name': r['test_name'] or r['test_id']})
-        sections = parse_json(r['sections_json'])
         for sec in sections:
             s = sec.get('section', 'unknown')
             sc = sec.get('score', {})
@@ -1009,6 +1165,12 @@ def api_get_comments(result_id):
 @require_role('admin', 'teacher')
 def api_save_comment(result_id):
     u = cur_user()
+    r = db.get_result_by_id(result_id)
+    if not r: abort(404)
+    # Only assignment teacher (primary or co-teacher) or admin can comment
+    if u['role'] == 'teacher':
+        if not db.is_assignment_teacher(u['id'], r['user_id'], r['test_id']):
+            abort(403)
     data = request.get_json()
     if not data: abort(400)
     db.save_teacher_comment(u['id'], result_id, data.get('question_id'), data.get('comment', ''))
@@ -1040,10 +1202,10 @@ def api_get_explanations(test_id):
                         qid = str(pg.get('question_id', ''))
                         if pg.get('explanation'):
                             md_expl[qid] = md_html(pg['explanation'])
-    # DB explanations override markdown
+    # DB explanations override markdown (escape HTML to prevent stored XSS)
     merged = {**md_expl}
     for qid, expl in db_expl.items():
-        merged[qid] = expl
+        merged[qid] = md_html(str(html_escape(expl)))
     return jsonify(merged)
 
 @app.route('/api/explanations/<test_id>', methods=['POST'])
@@ -1094,12 +1256,12 @@ def export_pdf_by_result(result_id):
         story.append(Paragraph(stxt, sec_s))
         rows = [['Q','','Your Answer','Correct','Time']]
         for d in sec.get('details',[]):
-            q=str(d.get('qid','')); dt=d.get('type',''); tm=str(d.get('time',0))+'s' if d.get('time') else ''
-            if dt in ('mc','cloze','build_sentence'):
+            q=str(d.get('qid','')); qtype=d.get('type',''); tm=str(d.get('time',0))+'s' if d.get('time') else ''
+            if qtype in ('mc','cloze','build_sentence'):
                 rows.append([q,'\u2713' if d.get('correct') else '\u2717',str(d.get('user',''))[:40],str(d.get('fullWord') or d.get('expected',''))[:40],tm])
-            elif dt in ('email','discussion'):
-                rows.append([q,'\u270E',f"{dt} ({d.get('wordCount',0)} words)",'',tm])
-            elif dt in ('listen_repeat','interview'):
+            elif qtype in ('email','discussion'):
+                rows.append([q,'\u270E',f"{qtype} ({d.get('wordCount',0)} words)",'',tm])
+            elif qtype in ('listen_repeat','interview'):
                 rows.append([q,'\U0001F3A4' if d.get('hasRecording') else '\u2014','Recorded' if d.get('hasRecording') else 'No recording','',tm])
         if len(rows)>1:
             tbl = Table(rows, colWidths=[30,18,170,170,40], repeatRows=1)
@@ -1125,8 +1287,8 @@ def _populate_error_bank(user_id, test_id, sections, question_data_map):
     for sec in sections:
         for d in sec.get('details', []):
             qid = str(d.get('qid', ''))
-            dt = d.get('type', '')
-            if dt not in ('mc', 'cloze', 'build_sentence'):
+            qtype = d.get('type', '')
+            if qtype not in ('mc', 'cloze', 'build_sentence'):
                 continue
             if d.get('correct') is True:
                 to_remove.append(qid)
@@ -1134,7 +1296,7 @@ def _populate_error_bank(user_id, test_id, sections, question_data_map):
                 qdata = question_data_map.get(qid, {})
                 if qdata:
                     correct_ans = d.get('expected', '') or d.get('fullWord', '') or qdata.get('answer', '')
-                    to_add.append((qid, dt, json.dumps(qdata), correct_ans, str(d.get('user', ''))))
+                    to_add.append((qid, qtype, json.dumps(qdata), correct_ans, str(d.get('user', ''))))
     if to_add or to_remove:
         db.batch_update_error_bank(user_id, test_id, to_add, to_remove)
 
@@ -1262,6 +1424,30 @@ def parent_student_view(student_id):
     return render_template('history.html', results=results, user=u,
         page=page, total_pages=total_pages, assigned_test_ids=assigned_test_ids,
         view_user=student, show_analytics=True, is_parent_view=True)
+
+
+# ===== Notifications =====
+
+@app.route('/api/notifications')
+@require_login
+def api_notifications():
+    """Get unread notifications for the current user."""
+    u = cur_user()
+    return jsonify({
+        'count': db.get_unread_count(u['id']),
+        'items': db.get_unread_notifications(u['id']),
+    })
+
+
+@app.route('/api/notifications/read', methods=['POST'])
+@require_login
+def api_mark_read():
+    """Mark notifications as read."""
+    u = cur_user()
+    data = request.get_json() or {}
+    ids = data.get('ids')
+    db.mark_notifications_read(u['id'], ids)
+    return jsonify({'ok': True})
 
 
 # ===== Init =====

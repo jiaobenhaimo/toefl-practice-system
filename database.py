@@ -7,7 +7,6 @@ import sqlite3
 import os
 import json
 import threading
-from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DB_PATH = os.environ.get('TOEFL_DB_PATH', os.path.join(
@@ -130,6 +129,28 @@ CREATE TABLE IF NOT EXISTS error_bank (
     FOREIGN KEY (user_id) REFERENCES users(id),
     UNIQUE(user_id, test_id, question_id)
 );
+
+CREATE TABLE IF NOT EXISTS assignment_co_teachers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assignment_id INTEGER NOT NULL,
+    teacher_id INTEGER NOT NULL,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (assignment_id) REFERENCES test_assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (teacher_id) REFERENCES users(id),
+    UNIQUE(assignment_id, teacher_id)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    link TEXT DEFAULT NULL,
+    read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 """
 
 
@@ -137,7 +158,11 @@ _local = threading.local()
 
 
 def _connect():
-    """Create a new SQLite connection with standard pragmas."""
+    """Create a new SQLite connection with standard pragmas.
+
+    Enabling WAL improves concurrent read/write performance. Foreign key
+    enforcement ensures referential integrity for the schema's FK columns.
+    """
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -166,7 +191,11 @@ def close_conn():
 
 def init_db(config=None):
     """Initialize database schema and create default accounts if needed.
-    Uses its own connection (runs at startup, outside request context)."""
+
+    Runs at startup (outside request context). This routine also performs
+    lightweight schema migrations (adding missing columns) to maintain
+    backward compatibility with older databases.
+    """
     conn = _connect()
     conn.executescript(SCHEMA)
     # Migrate: add due_date to test_assignments if missing
@@ -177,6 +206,10 @@ def init_db(config=None):
     user_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
     if 'linked_student_id' not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN linked_student_id INTEGER DEFAULT NULL")
+    # Migrate: add submitted column to teacher_comments for rubric draft/submit workflow
+    tc_cols = [r[1] for r in conn.execute("PRAGMA table_info(teacher_comments)").fetchall()]
+    if 'submitted' not in tc_cols:
+        conn.execute("ALTER TABLE teacher_comments ADD COLUMN submitted INTEGER NOT NULL DEFAULT 1")
     # Create default admin account if none exists
     admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
     if not admin:
@@ -267,6 +300,7 @@ def delete_user(user_id):
     conn.execute("DELETE FROM teacher_comments WHERE teacher_id=?", (user_id,))
     conn.execute("DELETE FROM student_notes WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_results WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM assignment_co_teachers WHERE teacher_id=?", (user_id,))
     conn.execute("DELETE FROM test_assignments WHERE student_id=? OR teacher_id=?", (user_id, user_id))
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
@@ -366,8 +400,65 @@ def get_assignments(teacher_id=None, student_id=None):
 def remove_assignment(assignment_id):
     """Remove a test assignment."""
     conn = get_db()
+    conn.execute("DELETE FROM assignment_co_teachers WHERE assignment_id=?", (assignment_id,))
     conn.execute("DELETE FROM test_assignments WHERE id=?", (assignment_id,))
     conn.commit()
+
+
+def add_co_teacher(assignment_id, teacher_id):
+    """Add a co-teacher to an assignment. Returns True if added, False if already exists."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO assignment_co_teachers (assignment_id, teacher_id) VALUES (?, ?)",
+            (assignment_id, teacher_id)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def get_co_teachers(assignment_id):
+    """Get all co-teacher IDs for an assignment."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT ct.teacher_id, u.display_name, u.username FROM assignment_co_teachers ct "
+        "JOIN users u ON ct.teacher_id = u.id WHERE ct.assignment_id=?",
+        (assignment_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_assignment_teacher_ids(student_id, test_id):
+    """Get all teacher IDs (primary + co-teachers) for assignments matching a student+test.
+    Returns a set of teacher IDs."""
+    conn = get_db()
+    # Primary teachers
+    rows = conn.execute(
+        "SELECT id, teacher_id FROM test_assignments WHERE student_id=? AND test_id=?",
+        (student_id, test_id)
+    ).fetchall()
+    teacher_ids = set()
+    assignment_ids = []
+    for r in rows:
+        teacher_ids.add(r['teacher_id'])
+        assignment_ids.append(r['id'])
+    # Co-teachers
+    if assignment_ids:
+        placeholders = ','.join('?' * len(assignment_ids))
+        co_rows = conn.execute(
+            f"SELECT teacher_id FROM assignment_co_teachers WHERE assignment_id IN ({placeholders})",
+            assignment_ids
+        ).fetchall()
+        for r in co_rows:
+            teacher_ids.add(r['teacher_id'])
+    return teacher_ids
+
+
+def is_assignment_teacher(teacher_id, student_id, test_id):
+    """Check if a teacher is authorized (primary or co-teacher) for a student's test assignment."""
+    return teacher_id in get_assignment_teacher_ids(student_id, test_id)
 
 
 def get_completed_test_keys(user_id):
@@ -500,28 +591,46 @@ def bulk_create_users(users_list):
 
 # ===== Teacher comments =====
 
-def get_teacher_comments(result_id):
-    """Get all teacher comments for a result. Returns dict with 'overall' and per-question keys."""
+def get_teacher_comments(result_id, include_drafts=False):
+    """Get all teacher comments for a result. Returns dict with 'overall' and per-question keys.
+    By default only returns submitted comments. Set include_drafts=True for teacher view."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT tc.*, u.display_name FROM teacher_comments tc JOIN users u ON tc.teacher_id=u.id "
-        "WHERE tc.result_id=? ORDER BY tc.updated_at DESC",
-        (result_id,)
-    ).fetchall()
+    query = ("SELECT tc.*, u.display_name FROM teacher_comments tc JOIN users u ON tc.teacher_id=u.id "
+             "WHERE tc.result_id=?")
+    if not include_drafts:
+        query += " AND tc.submitted=1"
+    query += " ORDER BY tc.updated_at DESC"
+    rows = conn.execute(query, (result_id,)).fetchall()
     result = {}
     for r in rows:
-        key = r['question_id'] if r['question_id'] else '_overall'
-        result[key] = {'comment': r['comment'], 'teacher': r['display_name'], 'updated_at': r['updated_at']}
+        rd = dict(r)
+        key = rd['question_id'] if rd['question_id'] else '_overall'
+        result[key] = {
+            'comment': rd['comment'], 'teacher': rd['display_name'],
+            'updated_at': rd['updated_at'], 'submitted': rd.get('submitted', 1),
+        }
     return result
 
 
-def save_teacher_comment(teacher_id, result_id, question_id, comment):
-    """Save or update a teacher comment. question_id=None for overall comment."""
+def save_teacher_comment(teacher_id, result_id, question_id, comment, submitted=1):
+    """Save or update a teacher comment. question_id=None for overall comment.
+    submitted=0 for rubric drafts, submitted=1 for finalized/visible to students."""
     conn = get_db()
     conn.execute(
-        "INSERT INTO teacher_comments (teacher_id, result_id, question_id, comment) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(teacher_id, result_id, question_id) DO UPDATE SET comment=excluded.comment, updated_at=datetime('now')",
-        (teacher_id, result_id, question_id or None, comment)
+        "INSERT INTO teacher_comments (teacher_id, result_id, question_id, comment, submitted) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(teacher_id, result_id, question_id) DO UPDATE SET comment=excluded.comment, submitted=excluded.submitted, updated_at=datetime('now')",
+        (teacher_id, result_id, question_id or None, comment, submitted)
+    )
+    conn.commit()
+
+
+def submit_rubric_scores(teacher_id, result_id):
+    """Mark all rubric draft scores for this result as submitted (visible to student)."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE teacher_comments SET submitted=1, updated_at=datetime('now') "
+        "WHERE teacher_id=? AND result_id=? AND question_id LIKE '_rubric_%' AND submitted=0",
+        (teacher_id, result_id)
     )
     conn.commit()
 
@@ -738,3 +847,47 @@ def get_linked_student(parent_id):
         return None
     student = conn.execute("SELECT * FROM users WHERE id=?", (parent['linked_student_id'],)).fetchone()
     return dict(student) if student else None
+
+
+# ===== Notifications =====
+
+def create_notification(user_id, type_, title, message, link=None):
+    """Create a notification for a user."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)",
+        (user_id, type_, title, message, link)
+    )
+    conn.commit()
+
+
+def get_unread_notifications(user_id, limit=20):
+    """Get unread notifications for a user."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM notifications WHERE user_id=? AND read=0 ORDER BY created_at DESC LIMIT ?",
+        (user_id, limit)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_unread_count(user_id):
+    """Count unread notifications."""
+    conn = get_db()
+    return conn.execute(
+        "SELECT COUNT(*) FROM notifications WHERE user_id=? AND read=0", (user_id,)
+    ).fetchone()[0]
+
+
+def mark_notifications_read(user_id, notification_ids=None):
+    """Mark notifications as read. If notification_ids is None, mark all."""
+    conn = get_db()
+    if notification_ids:
+        placeholders = ','.join('?' * len(notification_ids))
+        conn.execute(
+            f"UPDATE notifications SET read=1 WHERE user_id=? AND id IN ({placeholders})",
+            [user_id] + list(notification_ids)
+        )
+    else:
+        conn.execute("UPDATE notifications SET read=1 WHERE user_id=?", (user_id,))
+    conn.commit()

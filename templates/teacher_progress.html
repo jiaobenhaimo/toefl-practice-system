@@ -59,26 +59,66 @@
 
         {% if not progress %}
         <div class="catalog-empty">
-            <pdata-i18n="noStudentsFound">No students found.</p>
+            <p data-i18n="noStudentsFound">No students found.</p>
         </div>
         {% else %}
         <div class="results-list">
             {% for p in progress %}
-            <a href="/teacher/student/{{ p.student.id }}" class="progress-row" style="text-decoration:none;color:inherit">
-                <div class="progress-row__info">
-                    <strong>{{ p.student.display_name }}</strong>
-                    <span style="color:var(--text-dim)">@{{ p.student.username }}</span>
-                </div>
-                <div class="progress-row__bar-wrap">
-                    <div class="progress-row__bar">
-                        <div class="progress-row__fill" style="width:{{ p.pct }}%"></div>
+            <div style="margin-bottom:8px">
+                <div class="progress-row" style="cursor:pointer" onclick="toggleAssignments('assign-{{ p.student.id }}')" role="button" tabindex="0">
+                    <div class="progress-row__info">
+                        <strong>{{ p.student.display_name }}</strong>
+                        <span style="color:var(--text-dim)">@{{ p.student.username }}</span>
                     </div>
+                    <div class="progress-row__bar-wrap">
+                        <div class="progress-row__bar">
+                            <div class="progress-row__fill" style="width:{{ p.pct }}%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-row__stat">
+                        <span class="progress-stat__num">{{ p.done }}</span><span class="progress-stat__slash">/</span><span class="progress-stat__den">{{ p.total }}</span>
+                    </div>
+                    <a href="/teacher/student/{{ p.student.id }}" class="btn btn--icon" title="View history" aria-label="View history" onclick="event.stopPropagation()" style="margin-left:8px">
+                        <svg width="16" height="16" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+                    </a>
                 </div>
-                <div class="progress-row__stat">
-                    {{ p.done }}/{{ p.total }}
-                    <span style="color:var(--text-dim)">({{ p.pct }}%)</span>
+                {% if p.assignments %}
+                <div id="assign-{{ p.student.id }}" class="assignment-detail" style="display:none;padding:8px 16px 8px 32px;background:var(--bg-input);border-radius:0 0 var(--radius-sm) var(--radius-sm);border:1px solid var(--border);border-top:none;margin-top:-4px">
+                    {% for a in p.assignments %}
+                    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+                        <span style="font-size:0.88rem;font-weight:500;min-width:140px">{{ tests.get(a.test_id, {}).get('test_name', a.test_id) }}</span>
+                        {% if a.section %}<span class="module-chip module-chip--{{ a.section }}" style="font-size:0.76rem">{{ a.section|capitalize }}</span>{% endif %}
+                        {% if a.due_date %}<span style="font-size:0.78rem;color:var(--text-dim)">Due: {{ a.due_date|fmtdate }}</span>{% endif %}
+                        {% if a.co_teachers %}
+                        <span style="font-size:0.76rem;color:var(--listening)">
+                            Co: {% for ct in a.co_teachers %}{{ ct.display_name }}{% if not loop.last %}, {% endif %}{% endfor %}
+                        </span>
+                        {% endif %}
+                        {% if user.id == a.teacher_id or user.role == 'admin' %}
+                        <form method="POST" action="/teacher/assign/{{ a.id }}/co-teacher" style="margin:0;margin-left:auto;display:flex;gap:4px;align-items:center" onclick="event.stopPropagation()">
+                            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                            <select name="co_teacher_id" class="login-input" style="font-size:0.78rem;height:32px;min-height:32px;padding:0 24px 0 8px;min-width:100px">
+                                <option value="">+ Co-teacher</option>
+                                {% for t in teachers %}
+                                {% if t.id != a.teacher_id %}
+                                <option value="{{ t.id }}">{{ t.display_name }}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn--secondary" style="font-size:0.78rem;height:32px;min-height:32px;padding:0 10px">Add</button>
+                        </form>
+                        <form method="POST" action="/teacher/assign/{{ a.id }}/delete" style="margin:0" onclick="event.stopPropagation()">
+                            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn--icon" style="color:var(--red);width:32px;height:32px;min-width:32px;min-height:32px" title="Remove">
+                                <svg width="12" height="12" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
                 </div>
-            </a>
+                {% endif %}
+            </div>
             {% endfor %}
         </div>
         {% endif %}
@@ -137,5 +177,10 @@ function pollLiveSessions() {
     });
 }
 pollLiveSessions();
+
+function toggleAssignments(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
 </script>
 {% endblock %}

@@ -7,6 +7,40 @@
     <main class="layout__main" style="display:flex;flex-direction:column">
         <h2 class="page-heading" data-i18n="pageAssignments">Assignments</h2>
 
+        <!-- Notifications (populated via JS) -->
+        <div id="notif-container" style="display:none;margin-bottom:12px"></div>
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/api/notifications').then(function(r) { return r.json(); }).then(function(data) {
+                if (!data.items || !data.items.length) return;
+                var container = document.getElementById('notif-container');
+                container.style.display = '';
+                data.items.forEach(function(n) {
+                    var div = document.createElement('div');
+                    div.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);margin-bottom:8px;font-size:0.9rem;cursor:pointer';
+                    div.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" style="flex-shrink:0;color:var(--accent)"><path d="M10 2a5 5 0 015 5v3l2 2H3l2-2V7a5 5 0 015-5zM8.5 17a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>' +
+                        '<span style="flex:1;color:var(--accent)">' + (function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML})(n.message) + '</span>' +
+                        '<button class="btn btn--icon" style="width:32px;height:32px;min-width:32px;min-height:32px;color:var(--text-dim)" title="Dismiss" aria-label="Dismiss">' +
+                        '<svg width="14" height="14" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+                    div.onclick = function(e) {
+                        if (e.target.closest('button')) {
+                            // Dismiss
+                            fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[n.id]})});
+                            div.remove();
+                            if (!container.children.length) container.style.display = 'none';
+                            return;
+                        }
+                        if (n.link) {
+                            fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[n.id]})});
+                            window.location.href = n.link;
+                        }
+                    };
+                    container.appendChild(div);
+                });
+            }).catch(function() {});
+        });
+        </script>
+
         <!-- Review banner (populated via JS) -->
         <div class="review-banner" id="review-banner" style="display:none">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v7l5 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>

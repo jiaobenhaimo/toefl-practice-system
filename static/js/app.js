@@ -374,7 +374,6 @@ async function loadAndStartModule() {
         isFinishing = false;
         audioPlaying = false;
         bookmarkedQuestions = new Set();
-        questionTimes = {};
         questionStartTime = 0;
         // Release mic if switching away from speaking
         if (cachedMicStream && currentModule.section !== 'speaking') {

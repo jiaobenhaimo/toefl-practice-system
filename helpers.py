@@ -2,7 +2,7 @@
 helpers.py — Shared helpers, decorators, caching, and config for the TOEFL Practice System.
 Imported by app.py and all route blueprints.
 """
-import os, json, copy, time, re, markdown, yaml
+import os, json, copy, time, markdown, yaml
 from pathlib import Path
 from functools import wraps
 from flask import session, request, redirect, abort, g
@@ -63,8 +63,7 @@ def cached_scan():
 
 def md_html(text):
     """Thread-safe markdown-to-HTML conversion."""
-    md = markdown.Markdown(extensions=['tables', 'nl2br'])
-    return md.convert(text)
+    return markdown.markdown(text, extensions=['tables', 'nl2br'])
 
 
 def pages_to_html(pages):
@@ -141,9 +140,13 @@ def get_result_or_403(result_id):
     r = db.get_result_by_id(result_id)
     if not r:
         abort(404)
-    if u['role'] == 'student' and r['user_id'] != u['id']:
+    # If no user is present, forbid access
+    if not u:
         abort(403)
-    if u['role'] == 'parent':
+    role = u.get('role') if isinstance(u, dict) else None
+    if role == 'student' and r['user_id'] != u['id']:
+        abort(403)
+    if role == 'parent':
         student = db.get_linked_student(u['id'])
         if not student or r['user_id'] != student['id']:
             abort(403)
@@ -188,17 +191,24 @@ _RATE_LIMIT_MAX = 10
 
 
 def check_rate_limit(ip):
-    """Returns True if rate limited."""
+    """Returns True if rate limited.
+
+    Maintains a simple in-memory sliding window of timestamps per IP. To avoid
+    unbounded memory growth the global map is pruned when it becomes large.
+    """
     now = time.time()
+    # Prune very old/stale entries when map grows to protect memory usage.
     if len(_login_attempts) > 1000:
         stale = [k for k, v in _login_attempts.items()
                  if not v or now - v[-1] > _RATE_LIMIT_WINDOW]
         for k in stale:
             del _login_attempts[k]
-    attempts = _login_attempts.get(ip, [])
-    attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-    _login_attempts[ip] = attempts
-    return len(attempts) >= _RATE_LIMIT_MAX
+    if ip not in _login_attempts:
+        return False
+    attempts = _login_attempts[ip]
+    # Filter in place
+    _login_attempts[ip] = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+    return len(_login_attempts[ip]) >= _RATE_LIMIT_MAX
 
 
 def record_attempt(ip):
@@ -250,9 +260,8 @@ def section_band(section, details, rubric_map):
                 max_raw += 1
                 if d.get('correct'):
                     raw += 1
-        for d in details:
-            dt, qid = d.get('type', ''), str(d.get('qid', ''))
-            if dt in ('email', 'discussion'):
+            elif dt in ('email', 'discussion'):
+                qid = str(d.get('qid', ''))
                 max_raw += 5
                 if qid in rubric_map:
                     raw += rubric_map[qid]

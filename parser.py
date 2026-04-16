@@ -278,9 +278,13 @@ def scan_tests_directory(tests_dir):
 
 
 def build_question_list(module_data):
-    """Flatten a single module into ordered list of pages for the test UI."""
-    pages = []
+    """Convert parsed module data into a flat list of question pages for the test engine.
+
+    Each page dict contains the question data needed to render one screen:
+    question_id, question_type, section, passage, prompt, choices, answer, etc.
+    """
     section = module_data['section']
+    pages = []
 
     for group in module_data['groups']:
         passages = group['passages']
