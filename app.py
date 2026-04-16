@@ -83,6 +83,35 @@ def csrf_check():
         if not token or token != session.get('_csrf'):
             abort(403)
 
+# ===== Shared helpers =====
+
+def _load_merged_explanations(test_id, test_info=None):
+    """Load and merge markdown + DB explanations for a test.
+    DB explanations override markdown ones. Returns dict {qid: html}."""
+    db_expl = db.get_explanations(test_id)
+    if not test_info:
+        tests = cached_scan()
+        test_info = tests.get(test_id)
+    md_expl = {}
+    if test_info:
+        seen = set()
+        for mi in test_info['modules']:
+            fn = mi['filename']
+            if fn in seen: continue
+            seen.add(fn)
+            fp = safe_path(TESTS_DIR, fn)
+            if fp and os.path.exists(fp):
+                parsed = cached_parse(fp)
+                for mod in parsed['modules']:
+                    for pg in build_question_list(mod):
+                        qid = str(pg.get('question_id', ''))
+                        if pg.get('explanation'):
+                            md_expl[qid] = md_html(pg['explanation'])
+    merged = {**md_expl}
+    for qid, expl in db_expl.items():
+        merged[qid] = md_html(str(html_escape(expl)))
+    return merged
+
 # ===== Auth routes =====
 
 @app.route('/login', methods=['GET','POST'])
@@ -101,8 +130,6 @@ def login():
             remember = request.form.get('remember') == 'on'
             session.clear()
             session['user_id'] = u['id']
-            session['role'] = u['role']
-            session['display_name'] = u['display_name']
             if remember: session.permanent = True
             nxt = request.args.get('next', '/')
             # Prevent open redirect — only allow relative paths
@@ -768,13 +795,19 @@ def teacher_progress():
     student_ids = [s['id'] for s in students]
     all_data = db.get_all_progress_data(student_ids)
     progress_data = []
+    # Batch-load co-teachers for all assignments (avoids N+1 queries)
+    all_assignment_ids = []
+    for s in students:
+        d = all_data.get(s['id'], {'assignments': [], 'completed_keys': set()})
+        for a in d['assignments']:
+            all_assignment_ids.append(a['id'])
+    co_teachers_map = db.batch_get_co_teachers(all_assignment_ids)
     for s in students:
         d = all_data.get(s['id'], {'assignments': [], 'completed_keys': set()})
         assignments = d['assignments']
         completed_keys = d['completed_keys']
-        # Enrich assignments with co-teacher info
         for a in assignments:
-            a['co_teachers'] = db.get_co_teachers(a['id'])
+            a['co_teachers'] = co_teachers_map.get(a['id'], [])
         total = len(assignments)
         done = sum(1 for a in assignments if (a['test_id'], a.get('section')) in completed_keys)
         progress_data.append({
@@ -798,9 +831,14 @@ def teacher_batch_export():
     if not student_ids:
         flash('No students selected')
         return redirect('/teacher/results')
-    all_results = []
-    for sid in student_ids:
-        all_results.extend(db.get_results(user_id=sid, limit=10000))
+    # Single query instead of N per-student queries
+    conn = db.get_db()
+    placeholders = ','.join('?' * len(student_ids))
+    all_results = [dict(r) for r in conn.execute(
+        f"SELECT r.*, u.display_name, u.username FROM test_results r "
+        f"LEFT JOIN users u ON r.user_id = u.id WHERE r.user_id IN ({placeholders}) ORDER BY r.date DESC",
+        student_ids
+    ).fetchall()]
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(['Student', 'Username', 'Test', 'Score', 'Total', 'Percent', 'Practice', 'Date'])
@@ -856,10 +894,7 @@ def review_test(result_id):
     if not test_info:
         flash('The test file for this result is no longer available.')
         return redirect('/history')
-    assignments = db.get_assignments(student_id=r['user_id'])
-    is_assigning_teacher = any(a['teacher_id'] == u['id'] and a['test_id'] == r['test_id'] for a in assignments)
-    return render_template('review.html', result=r, test_info=test_info, user=u,
-        is_assigning_teacher=is_assigning_teacher)
+    return render_template('review.html', result=r, test_info=test_info, user=u)
 
 @app.route('/api/review-data/<int:result_id>')
 @require_login
@@ -900,41 +935,15 @@ def api_review_data(result_id):
     notes = db.get_notes(u['id'], result_id)
     # Teachers/admins who are assignment teachers see draft rubric scores
     is_auth_teacher = False
-    authorized_teacher_ids = set()
+    authorized_teacher_ids = db.get_assignment_teacher_ids(r['user_id'], r['test_id'])
     if u['role'] == 'admin':
         is_auth_teacher = True
     elif u['role'] == 'teacher':
-        authorized_teacher_ids = db.get_assignment_teacher_ids(r['user_id'], r['test_id'])
         is_auth_teacher = u['id'] in authorized_teacher_ids
     comments = db.get_teacher_comments(result_id, include_drafts=is_auth_teacher)
-    db_expl = db.get_explanations(r['test_id'])
-    md_expl = {}
-    seen = set()
-    for mi in test_info['modules']:
-        fn = mi['filename']
-        if fn in seen: continue
-        seen.add(fn)
-        fp = safe_path(TESTS_DIR, fn)
-        if fp and os.path.exists(fp):
-            parsed = cached_parse(fp)
-            for mod in parsed['modules']:
-                for pg in build_question_list(mod):
-                    qid = str(pg.get('question_id', ''))
-                    if pg.get('explanation'):
-                        md_expl[qid] = md_html(pg['explanation'])
-    # DB explanations override markdown (escape HTML to prevent stored XSS)
-    explanations = {**md_expl}
-    for qid, expl in db_expl.items():
-        explanations[qid] = md_html(str(html_escape(expl)))
+    explanations = _load_merged_explanations(r['test_id'], test_info)
     rec_dir = os.path.join(RECORDINGS_DIR, str(result_id))
     recs = [os.path.splitext(f)[0] for f in os.listdir(rec_dir)] if os.path.isdir(rec_dir) else []
-    # Extract rubric scores from comments
-    rubric_scores = {}
-    for key, val in comments.items():
-        if key.startswith('_rubric_'):
-            qid = key[8:]
-            try: rubric_scores[qid] = int(val['comment'])
-            except Exception: pass
     # Build section summaries for the overview
     section_summaries = []
     for sec in sections:
@@ -950,8 +959,7 @@ def api_review_data(result_id):
         'section_summaries': section_summaries,
         'student_name': r.get('display_name') or r.get('username') or '',
         'is_authorized_teacher': is_auth_teacher,
-        'authorized_teacher_ids': list(authorized_teacher_ids if u['role'] == 'teacher' else
-            db.get_assignment_teacher_ids(r['user_id'], r['test_id'])),
+        'authorized_teacher_ids': list(authorized_teacher_ids),
     })
 
 # ===== Rubric Scoring (Speaking/Writing) =====
@@ -1181,32 +1189,7 @@ def api_save_comment(result_id):
 @app.route('/api/explanations/<test_id>', methods=['GET'])
 @require_login
 def api_get_explanations(test_id):
-    # Merge: markdown-based explanations (from parsed test) + DB explanations
-    db_expl = db.get_explanations(test_id)
-    # Get markdown explanations from ALL test files (#12)
-    tests = cached_scan()
-    md_expl = {}
-    if test_id in tests:
-        t = tests[test_id]
-        seen_files = set()
-        for mod_info in t['modules']:
-            fn = mod_info['filename']
-            if fn in seen_files: continue
-            seen_files.add(fn)
-            fp = safe_path(TESTS_DIR, fn)
-            if fp and os.path.exists(fp):
-                parsed = cached_parse(fp)
-                for mod in parsed['modules']:
-                    pages = build_question_list(mod)
-                    for pg in pages:
-                        qid = str(pg.get('question_id', ''))
-                        if pg.get('explanation'):
-                            md_expl[qid] = md_html(pg['explanation'])
-    # DB explanations override markdown (escape HTML to prevent stored XSS)
-    merged = {**md_expl}
-    for qid, expl in db_expl.items():
-        merged[qid] = md_html(str(html_escape(expl)))
-    return jsonify(merged)
+    return jsonify(_load_merged_explanations(test_id))
 
 @app.route('/api/explanations/<test_id>', methods=['POST'])
 @require_login

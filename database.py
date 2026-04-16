@@ -430,6 +430,24 @@ def get_co_teachers(assignment_id):
     return [dict(r) for r in rows]
 
 
+def batch_get_co_teachers(assignment_ids):
+    """Batch-load co-teachers for multiple assignments. Returns dict {assignment_id: [co_teachers]}."""
+    if not assignment_ids:
+        return {}
+    conn = get_db()
+    placeholders = ','.join('?' * len(assignment_ids))
+    rows = conn.execute(
+        f"SELECT ct.assignment_id, ct.teacher_id, u.display_name, u.username "
+        f"FROM assignment_co_teachers ct JOIN users u ON ct.teacher_id = u.id "
+        f"WHERE ct.assignment_id IN ({placeholders})",
+        assignment_ids
+    ).fetchall()
+    result = {aid: [] for aid in assignment_ids}
+    for r in rows:
+        result[r['assignment_id']].append(dict(r))
+    return result
+
+
 def get_assignment_teacher_ids(student_id, test_id):
     """Get all teacher IDs (primary + co-teachers) for assignments matching a student+test.
     Returns a set of teacher IDs."""
@@ -625,12 +643,13 @@ def save_teacher_comment(teacher_id, result_id, question_id, comment, submitted=
 
 
 def submit_rubric_scores(teacher_id, result_id):
-    """Mark all rubric draft scores for this result as submitted (visible to student)."""
+    """Mark all rubric draft scores for this result as submitted (visible to student).
+    Publishes drafts from ALL authorized teachers, not just the calling one."""
     conn = get_db()
     conn.execute(
         "UPDATE teacher_comments SET submitted=1, updated_at=datetime('now') "
-        "WHERE teacher_id=? AND result_id=? AND question_id LIKE '_rubric_%' AND submitted=0",
-        (teacher_id, result_id)
+        "WHERE result_id=? AND question_id LIKE '_rubric_%' AND submitted=0",
+        (result_id,)
     )
     conn.commit()
 

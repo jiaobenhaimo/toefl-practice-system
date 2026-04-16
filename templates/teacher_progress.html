@@ -97,7 +97,7 @@
                         {% if user.id == a.teacher_id or user.role == 'admin' %}
                         <form method="POST" action="/teacher/assign/{{ a.id }}/co-teacher" style="margin:0;margin-left:auto;display:flex;gap:4px;align-items:center" onclick="event.stopPropagation()">
                             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                            <select name="co_teacher_id" class="login-input" style="font-size:0.78rem;height:32px;min-height:32px;padding:0 24px 0 8px;min-width:100px">
+                            <select name="co_teacher_id" class="login-input" style="font-size:0.82rem;min-height:44px;padding:0 24px 0 8px;min-width:100px">
                                 <option value="">+ Co-teacher</option>
                                 {% for t in teachers %}
                                 {% if t.id != a.teacher_id %}
@@ -105,12 +105,12 @@
                                 {% endif %}
                                 {% endfor %}
                             </select>
-                            <button type="submit" class="btn btn--secondary" style="font-size:0.78rem;height:32px;min-height:32px;padding:0 10px">Add</button>
+                            <button type="submit" class="btn btn--secondary" style="font-size:0.82rem;min-height:44px;padding:0 12px">Add</button>
                         </form>
                         <form method="POST" action="/teacher/assign/{{ a.id }}/delete" style="margin:0" onclick="event.stopPropagation()">
                             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn--icon" style="color:var(--red);width:32px;height:32px;min-width:32px;min-height:32px" title="Remove">
-                                <svg width="12" height="12" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                            <button type="submit" class="btn btn--icon" style="color:var(--red);width:44px;height:44px;min-width:44px;min-height:44px" title="Remove">
+                                <svg width="14" height="14" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                             </button>
                         </form>
                         {% endif %}
