@@ -280,3 +280,34 @@ def section_band(section, details, rubric_map):
             return None
         return lookup_band(_SPEAKING_BAND_TABLE, raw / max_raw * 55)
     return None
+
+
+def compute_result_bands(sections_json_str, rubric_map=None):
+    """Compute 1-6 band scores from a result's sections_json.
+    Returns dict with 'overall', 'section_bands' {section: band}, and 'needs_rubric' bool.
+    needs_rubric is True if speaking or writing sections exist but lack rubric scores."""
+    if rubric_map is None:
+        rubric_map = {}
+    try:
+        sections = json.loads(sections_json_str) if sections_json_str else []
+    except Exception:
+        sections = []
+    section_bands = {}
+    needs_rubric = False
+    for sec in sections:
+        s = sec.get('section', '')
+        band = section_band(s, sec.get('details', []), rubric_map)
+        if band is not None:
+            section_bands[s] = band
+        # Check if this section needs rubric scores that haven't been provided
+        if s in ('speaking', 'writing'):
+            for d in sec.get('details', []):
+                dt = d.get('type', '')
+                if dt in ('email', 'discussion', 'listen_repeat', 'interview'):
+                    qid = str(d.get('qid', ''))
+                    if qid not in rubric_map:
+                        needs_rubric = True
+    overall = None
+    if section_bands:
+        overall = round(sum(section_bands.values()) / len(section_bands) * 2) / 2
+    return {'overall': overall, 'section_bands': section_bands, 'needs_rubric': needs_rubric}

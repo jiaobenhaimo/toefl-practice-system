@@ -158,9 +158,11 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if r.total_questions > 0 %}
-                            {{ r.total_correct }}/{{ r.total_questions }}
-                            ({{ (r.total_correct / r.total_questions * 100)|round|int }}%)
+                            {% if r.band_overall is not none %}
+                            <strong style="color:var(--accent)">{{ '%.1f'|format(r.band_overall) }}</strong>
+                            {% if r.needs_rubric %}<span style="color:var(--amber);font-size:0.78rem;margin-left:4px" title="Awaiting teacher rubric scores">⏳</span>{% endif %}
+                            {% elif r.needs_rubric %}
+                            <span style="color:var(--text-muted);font-size:0.82rem" data-i18n="awaitingScore">Awaiting score</span>
                             {% endif %}
                         </td>
                         <td style="color:var(--text-dim)"><span data-i18n-date="{{ r.date }}">{{ r.date|fmtdate }}</span></td>

@@ -26,6 +26,7 @@ from helpers import (
     check_rate_limit, record_attempt,
     lookup_band, section_band,
     _RL_BAND_TABLE, _WRITING_BAND_TABLE,
+    compute_result_bands,
 )
 
 app = Flask(__name__)
@@ -111,6 +112,19 @@ def _load_merged_explanations(test_id, test_info=None):
     for qid, expl in db_expl.items():
         merged[qid] = md_html(str(html_escape(expl)))
     return merged
+
+def _enrich_results_with_bands(results):
+    """Add band score info to a list of result dicts. Modifies in place.
+    Batch-loads rubric scores in one query to avoid N+1."""
+    if not results:
+        return
+    result_ids = [r['id'] for r in results]
+    rubric_map = db.batch_get_rubric_scores(result_ids)
+    for r in results:
+        bands = compute_result_bands(r.get('sections_json', '[]'), rubric_map.get(r['id'], {}))
+        r['band_overall'] = bands['overall']
+        r['band_sections'] = bands['section_bands']
+        r['needs_rubric'] = bands['needs_rubric']
 
 # ===== Auth routes =====
 
@@ -721,6 +735,7 @@ def teacher_results():
     per_page = 50
     total = db.count_results()
     results = db.get_results(limit=per_page, offset=(page-1)*per_page)
+    _enrich_results_with_bands(results)
     total_pages = max(1, (total + per_page - 1) // per_page)
     return render_template('teacher_results.html', results=results,
         students=db.list_users(role='student'), user=cur_user(),
@@ -1051,6 +1066,7 @@ def history_page():
     per_page = 50
     total = db.count_results(user_id=u['id'])
     results = db.get_results(user_id=u['id'], limit=per_page, offset=(page-1)*per_page)
+    _enrich_results_with_bands(results)
     total_pages = max(1, (total + per_page - 1) // per_page)
     my_assignments = db.get_assignments(student_id=u['id'])
     assigned_test_ids = set(a['test_id'] for a in my_assignments)
@@ -1070,6 +1086,7 @@ def teacher_student_view(uid):
     per_page = 50
     total = db.count_results(user_id=uid)
     results = db.get_results(user_id=uid, limit=per_page, offset=(page-1)*per_page)
+    _enrich_results_with_bands(results)
     total_pages = max(1, (total + per_page - 1) // per_page)
     assignments = db.get_assignments(student_id=uid)
     assigned_test_ids = set(a['test_id'] for a in assignments)
@@ -1401,6 +1418,7 @@ def parent_student_view(student_id):
     per_page = 50
     total = db.count_results(user_id=student_id)
     results = db.get_results(user_id=student_id, limit=per_page, offset=(page-1)*per_page)
+    _enrich_results_with_bands(results)
     total_pages = max(1, (total + per_page - 1) // per_page)
     assignments = db.get_assignments(student_id=student_id)
     assigned_test_ids = set(a['test_id'] for a in assignments)

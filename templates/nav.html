@@ -79,9 +79,11 @@
             {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}" data-i18n-role="{{ user.role }}">{{ user.role }}</span>{% endif %}
         </div>
         <a href="/account" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Account settings">
+            <svg width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
             <span data-i18n="navAccount">Account</span>
         </a>
         <a href="/logout" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Log out">
+            <svg width="18" height="18" viewBox="0 0 20 20"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navLogOut">Log out</span>
         </a>
         {% elif is_guest %}
@@ -89,6 +91,7 @@
             <span class="sidebar__user-name" data-i18n="navGuest">Guest</span>
         </div>
         <a href="/login" class="sidebar__link sidebar__link--footer" aria-label="Log in">
+            <svg width="18" height="18" viewBox="0 0 20 20"><path d="M13 4h2a1 1 0 011 1v10a1 1 0 01-1 1h-2M10 14l-4-4 4-4M6 10h8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navLogIn">Log in</span>
         </a>
         {% endif %}

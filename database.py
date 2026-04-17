@@ -666,6 +666,28 @@ def get_explanations(test_id):
     return {r['question_id']: r['explanation'] for r in rows}
 
 
+def batch_get_rubric_scores(result_ids):
+    """Batch-load submitted rubric scores for multiple results.
+    Returns dict {result_id: {qid: score_int}}."""
+    if not result_ids:
+        return {}
+    conn = get_db()
+    placeholders = ','.join('?' * len(result_ids))
+    rows = conn.execute(
+        f"SELECT result_id, question_id, comment FROM teacher_comments "
+        f"WHERE result_id IN ({placeholders}) AND question_id LIKE '_rubric_%' AND submitted=1",
+        result_ids
+    ).fetchall()
+    result = {rid: {} for rid in result_ids}
+    for r in rows:
+        qid = r['question_id'][8:]  # strip '_rubric_' prefix
+        try:
+            result[r['result_id']][qid] = int(r['comment'])
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
 def save_explanation(test_id, question_id, explanation, author_id=None):
     """Save or update an explanation for a question."""
     conn = get_db()
