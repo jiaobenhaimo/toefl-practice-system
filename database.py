@@ -210,6 +210,24 @@ def init_db(config=None):
     tc_cols = [r[1] for r in conn.execute("PRAGMA table_info(teacher_comments)").fetchall()]
     if 'submitted' not in tc_cols:
         conn.execute("ALTER TABLE teacher_comments ADD COLUMN submitted INTEGER NOT NULL DEFAULT 1")
+    # Migrate: add schedule_start/schedule_end to test_assignments for scheduling
+    assign_cols = [r[1] for r in conn.execute("PRAGMA table_info(test_assignments)").fetchall()]
+    if 'schedule_start' not in assign_cols:
+        conn.execute("ALTER TABLE test_assignments ADD COLUMN schedule_start TEXT DEFAULT NULL")
+    if 'schedule_end' not in assign_cols:
+        conn.execute("ALTER TABLE test_assignments ADD COLUMN schedule_end TEXT DEFAULT NULL")
+    # Create indexes (idempotent). Significantly speed up repeated per-user lookups
+    # in get_results, get_analytics, get_assignments, and get_active_session.
+    conn.executescript("""
+    CREATE INDEX IF NOT EXISTS idx_results_user_date ON test_results(user_id, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_results_test ON test_results(test_id);
+    CREATE INDEX IF NOT EXISTS idx_assignments_student ON test_assignments(student_id);
+    CREATE INDEX IF NOT EXISTS idx_assignments_teacher ON test_assignments(teacher_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user_finished ON test_sessions(user_id, finished, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_comments_result ON teacher_comments(result_id);
+    CREATE INDEX IF NOT EXISTS idx_error_bank_user_review ON error_bank(user_id, next_review);
+    """)
     # Create default admin account if none exists
     admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
     if not admin:
@@ -293,8 +311,18 @@ def update_user(user_id, display_name=None, password=None, role=None, username=N
 
 
 def delete_user(user_id):
-    """Delete user and their results, assignments, notes, comments, sessions, and error bank."""
+    """Delete user and their results, assignments, notes, comments, sessions, and error bank.
+    Also cleans up orphaned teacher_comments/notes/error_bank entries pointing at the user's results
+    or sessions (since teacher_comments authored by OTHER teachers on the deleted user's results
+    would otherwise be orphaned)."""
     conn = get_db()
+    # First capture result ids owned by this user so we can clean up dependents across teachers.
+    result_ids = [r[0] for r in conn.execute(
+        "SELECT id FROM test_results WHERE user_id=?", (user_id,)).fetchall()]
+    if result_ids:
+        placeholders = ','.join('?' * len(result_ids))
+        conn.execute(f"DELETE FROM teacher_comments WHERE result_id IN ({placeholders})", result_ids)
+        conn.execute(f"DELETE FROM student_notes WHERE result_id IN ({placeholders})", result_ids)
     conn.execute("DELETE FROM error_bank WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM test_sessions WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM teacher_comments WHERE teacher_id=?", (user_id,))
@@ -302,6 +330,7 @@ def delete_user(user_id):
     conn.execute("DELETE FROM test_results WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM assignment_co_teachers WHERE teacher_id=?", (user_id,))
     conn.execute("DELETE FROM test_assignments WHERE student_id=? OR teacher_id=?", (user_id, user_id))
+    conn.execute("DELETE FROM notifications WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
 
@@ -365,8 +394,8 @@ def count_results(user_id=None, test_id=None):
 
 # ===== Test assignments =====
 
-def assign_test(teacher_id, student_id, test_id, section=None, due_date=None):
-    """Assign a test (or section) to a student with optional due date."""
+def assign_test(teacher_id, student_id, test_id, section=None, due_date=None, schedule_start=None, schedule_end=None):
+    """Assign a test (or section) to a student with optional due date and schedule window."""
     conn = get_db()
     existing = conn.execute(
         "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=? AND section IS ?",
@@ -374,8 +403,9 @@ def assign_test(teacher_id, student_id, test_id, section=None, due_date=None):
     ).fetchone()
     if not existing:
         conn.execute(
-            "INSERT INTO test_assignments (teacher_id, student_id, test_id, section, due_date) VALUES (?, ?, ?, ?, ?)",
-            (teacher_id, student_id, test_id, section, due_date)
+            "INSERT INTO test_assignments (teacher_id, student_id, test_id, section, due_date, schedule_start, schedule_end) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (teacher_id, student_id, test_id, section, due_date, schedule_start, schedule_end)
         )
         conn.commit()
 
@@ -417,17 +447,6 @@ def add_co_teacher(assignment_id, teacher_id):
         return True
     except sqlite3.IntegrityError:
         return False
-
-
-def get_co_teachers(assignment_id):
-    """Get all co-teacher IDs for an assignment."""
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT ct.teacher_id, u.display_name, u.username FROM assignment_co_teachers ct "
-        "JOIN users u ON ct.teacher_id = u.id WHERE ct.assignment_id=?",
-        (assignment_id,)
-    ).fetchall()
-    return [dict(r) for r in rows]
 
 
 def batch_get_co_teachers(assignment_ids):

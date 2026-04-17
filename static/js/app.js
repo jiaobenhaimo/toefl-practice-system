@@ -240,10 +240,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (sess.resumed && sess.playlist_idx !== undefined) {
                 const resumeIdx = sess.playlist_idx;
                 if (resumeIdx > 0 && resumeIdx < playlist.length) {
-                    if (confirm(t('resumeConfirm'))) {
+                    const wantResume = await confirmAsync(t('continue_'), t('resumeConfirm'), t('continue_'), { destructive: false });
+                    if (wantResume) {
                         playlistIdx = resumeIdx;
                         allResults = Array.isArray(sess.completed) ? sess.completed : [];
-                        // Module state will be loaded in loadAndStartModule
                         _serverModuleState = sess;
                     } else {
                         // User declined resume — delete old session and create new
@@ -297,7 +297,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (mode === 'full') {
             const saved = loadPlaylistProgress();
             if (saved && saved.playlistIdx > 0 && saved.playlistIdx < playlist.length) {
-                if (confirm(t('resumeConfirm'))) {
+                const wantResume = await confirmAsync(t('continue_'), t('resumeConfirm'), t('continue_'), { destructive: false });
+                if (wantResume) {
                     playlistIdx = saved.playlistIdx;
                     allResults = Array.isArray(saved.allResults) ? saved.allResults : [];
                 }
@@ -395,18 +396,18 @@ async function loadAndStartModule() {
 }
 
 async function exitModule() {
-    if (confirm(t('exitConfirm'))) {
-        collectAnswer();
-        saveModuleProgress();
-        stopTimer();
-        stopAutoSave();
-        await stopRecording();
-        if (cachedMicStream) {
-            cachedMicStream.getTracks().forEach(t => t.stop());
-            cachedMicStream = null;
-        }
-        window.location.href = '/';
+    const confirmed = await confirmAsync(t('finish'), t('exitConfirm'), t('finish'), { destructive: true });
+    if (!confirmed) return;
+    collectAnswer();
+    saveModuleProgress();
+    stopTimer();
+    stopAutoSave();
+    await stopRecording();
+    if (cachedMicStream) {
+        cachedMicStream.getTracks().forEach(t => t.stop());
+        cachedMicStream = null;
     }
+    window.location.href = '/';
 }
 
 /* ======= TIMER ======= */
@@ -582,9 +583,8 @@ async function nextQuestion() {
                 let msg = t('timeLeftConfirm').replace('{n}', mins).replace('{section}', section);
                 if (canGoBack) msg += ' ' + t('canReview');
                 msg += '\n\n' + t('finishConfirm');
-                if (!confirm(msg)) {
-                    return;
-                }
+                const confirmed = await confirmAsync(t('finish'), msg, t('finish'), { destructive: false });
+                if (!confirmed) return;
             }
             await finishCurrentModule();
             return;
@@ -870,10 +870,11 @@ function renderBuildSentence(body, page) {
 
     // Build the right-side content (slots + word bank)
     function buildRightContent(container) {
-        container.appendChild(el('div', 'bs-instruction', 'Tap words in order to build the sentence. Tap a placed word to remove it.'));
+        container.appendChild(el('div', 'bs-instruction', t('tapWords')));
 
         const slotsArea = el('div', 'sentence-slots'); slotsArea.id = 'sentence-slots';
         slotsArea.setAttribute('data-empty', 'true');
+        slotsArea.setAttribute('data-placeholder', t('tapWords').split('.')[0] + '.');
         const lastChar = (page.answer || '').trim().slice(-1);
         const punct = /[?!.]/.test(lastChar) ? lastChar : '.';
         const punctEl = el('span', 'sentence-punct', punct);

@@ -46,14 +46,48 @@
                 var gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
                 var textColor = isDark ? '#98989d' : '#8e8e93';
                 Chart.defaults.color = textColor;
-                // Score Trend — show band score if available, else percentage
+
+                // Score Trend — per-section band lines
                 var labels = data.score_history.map(function(h) { return h.date; });
-                var values = data.score_history.map(function(h) { return h.band || (h.pct / 100 * 6).toFixed(1); });
+                var sectionColors = { reading: '#007aff', listening: '#34c759', writing: '#ff9500', speaking: '#af52de' };
+                var sectionNames = ['reading', 'listening', 'writing', 'speaking'];
+                var datasets = [];
+                sectionNames.forEach(function(sec) {
+                    var values = data.score_history.map(function(h) {
+                        return (h.section_bands && h.section_bands[sec] !== undefined) ? h.section_bands[sec] : null;
+                    });
+                    // Only add dataset if it has at least one non-null value
+                    if (values.some(function(v) { return v !== null; })) {
+                        datasets.push({
+                            label: sec.charAt(0).toUpperCase() + sec.slice(1),
+                            data: values,
+                            borderColor: sectionColors[sec],
+                            backgroundColor: 'transparent',
+                            tension: 0.3,
+                            pointRadius: 3,
+                            spanGaps: true,
+                            borderWidth: 2,
+                        });
+                    }
+                });
+                // Fallback: if no per-section data, show overall band
+                if (datasets.length === 0) {
+                    datasets.push({
+                        label: 'Overall',
+                        data: data.score_history.map(function(h) { return h.band || null; }),
+                        borderColor: '#007aff',
+                        backgroundColor: 'rgba(0,122,255,0.08)',
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 3,
+                    });
+                }
                 new Chart(document.getElementById('chart-trend'), {
                     type: 'line',
-                    data: { labels: labels, datasets: [{ data: values, borderColor: '#007aff', backgroundColor: 'rgba(0,122,255,0.08)', tension: 0.3, fill: true, pointRadius: 3 }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-                        scales: { y: { min: 0, max: 6, ticks: { stepSize: 1 }, grid: { color: gridColor } }, x: { display: false } } }
+                    data: { labels: labels, datasets: datasets },
+                    options: { responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: datasets.length > 1, position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } } },
+                        scales: { y: { min: 1, max: 6, ticks: { stepSize: 1 }, grid: { color: gridColor } }, x: { display: false } } }
                 });
                 // Section Breakdown — all 4 sections
                 var secLabels = data.section_breakdown.map(function(s) { return s.section.charAt(0).toUpperCase() + s.section.slice(1); });

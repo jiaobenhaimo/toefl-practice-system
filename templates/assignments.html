@@ -18,23 +18,32 @@
                 data.items.forEach(function(n) {
                     var div = document.createElement('div');
                     div.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);margin-bottom:8px;font-size:0.9rem;cursor:pointer';
-                    div.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" style="flex-shrink:0;color:var(--accent)"><path d="M10 2a5 5 0 015 5v3l2 2H3l2-2V7a5 5 0 015-5zM8.5 17a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>' +
-                        '<span style="flex:1;color:var(--accent)">' + (function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML})(n.message) + '</span>' +
-                        '<button class="btn btn--icon" style="width:44px;height:44px;min-width:44px;min-height:44px;color:var(--text-dim)" title="Dismiss" aria-label="Dismiss">' +
-                        '<svg width="14" height="14" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
-                    div.onclick = function(e) {
-                        if (e.target.closest('button')) {
-                            // Dismiss
-                            fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[n.id]})});
-                            div.remove();
-                            if (!container.children.length) container.style.display = 'none';
-                            return;
-                        }
+                    var iconSvg = '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" style="flex-shrink:0;color:var(--accent)"><path d="M10 2a5 5 0 015 5v3l2 2H3l2-2V7a5 5 0 015-5zM8.5 17a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>';
+                    var msgEl = document.createElement('span');
+                    msgEl.style.cssText = 'flex:1;color:var(--accent)';
+                    msgEl.textContent = n.message;
+                    var dismissBtn = document.createElement('button');
+                    dismissBtn.type = 'button';
+                    dismissBtn.className = 'btn btn--icon';
+                    dismissBtn.style.cssText = 'color:var(--text-dim)';
+                    dismissBtn.setAttribute('title', 'Dismiss');
+                    dismissBtn.setAttribute('aria-label', 'Dismiss');
+                    dismissBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+                    div.innerHTML = iconSvg;
+                    div.appendChild(msgEl);
+                    div.appendChild(dismissBtn);
+                    dismissBtn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[n.id]})});
+                        div.remove();
+                        if (!container.children.length) container.style.display = 'none';
+                    });
+                    div.addEventListener('click', function() {
                         if (n.link) {
                             fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[n.id]})});
                             window.location.href = n.link;
                         }
-                    };
+                    });
                     container.appendChild(div);
                 });
             }).catch(function() {});
@@ -69,7 +78,10 @@
             {% for a in assignments %}
             {% set t = tests.get(a.test_id) %}
             {% if t %}
-            {% if a.section %}
+            {% set sched_locked = (a.schedule_start and a.schedule_start > now_iso) or (a.schedule_end and a.schedule_end < now_iso) %}
+            {% if sched_locked %}
+            <div class="assignment-card assignment-card--locked" title="{% if a.schedule_start and a.schedule_start > now_iso %}Available from {{ a.schedule_start|fmtdate_full }}{% else %}Schedule ended {{ a.schedule_end|fmtdate_full }}{% endif %}">
+            {% elif a.section %}
             <a href="/test/{{ a.test_id }}?mode=section&section={{ a.section }}" class="assignment-card">
             {% else %}
             <a href="/test/{{ a.test_id }}?mode=full" class="assignment-card">
@@ -93,8 +105,22 @@
                     <br>
                     <span style="color:var(--{% if a.due_date < now_date %}red{% else %}amber{% endif %})"><span data-i18n="due">Due</span> <span data-i18n-date="{{ a.due_date }}">{{ a.due_date|fmtdate }}</span></span>
                     {% endif %}
+                    {% if a.schedule_start or a.schedule_end %}
+                    <br>
+                    <span style="color:var(--text-dim);font-size:0.82rem">
+                        {% if a.schedule_start and a.schedule_start > now_iso %}
+                        <span data-i18n="notYetAvailable">Not yet available</span> · <span data-i18n="scheduleOpens">Opens</span> <span data-i18n-date="{{ a.schedule_start }}">{{ a.schedule_start|fmtdate_full }}</span>
+                        {% elif a.schedule_end and a.schedule_end < now_iso %}
+                        <span style="color:var(--red)" data-i18n="scheduleExpired">Schedule expired</span>
+                        {% else %}
+                        {% if a.schedule_end %}
+                        <span data-i18n="availableUntil">Available until</span> <span data-i18n-date="{{ a.schedule_end }}">{{ a.schedule_end|fmtdate_full }}</span>
+                        {% endif %}
+                        {% endif %}
+                    </span>
+                    {% endif %}
                 </div>
-            </a>
+            {% if sched_locked %}</div>{% else %}</a>{% endif %}
             {% endif %}
             {% endfor %}
         </div>

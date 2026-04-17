@@ -50,7 +50,9 @@
                     <option value="speaking" data-i18n="sectionSpeaking">Speaking</option>
                 </select>
                 <div style="display:flex;gap:10px">
-                    <input type="date" name="due_date" class="login-input" style="flex:1" title="Due date (optional)" aria-label="Due date">
+                    <input type="date" name="due_date" class="login-input" style="flex:1" title="Due date (optional)" aria-label="Due date" data-i18n-title="dueDate">
+                    <input type="datetime-local" name="schedule_start" class="login-input" style="flex:1" title="Available from (optional)" aria-label="Schedule start" data-i18n-title="scheduleStart">
+                    <input type="datetime-local" name="schedule_end" class="login-input" style="flex:1" title="Available until (optional)" aria-label="Schedule end" data-i18n-title="scheduleEnd">
                     <button type="submit" class="btn btn--primary" data-i18n="assign">Assign</button>
                 </div>
             </form>
@@ -89,6 +91,8 @@
                         <span style="font-size:0.88rem;font-weight:500;min-width:140px">{{ tests.get(a.test_id, {}).get('test_name', a.test_id) }}</span>
                         {% if a.section %}<span class="module-chip module-chip--{{ a.section }}" style="font-size:0.76rem">{{ a.section|capitalize }}</span>{% endif %}
                         {% if a.due_date %}<span style="font-size:0.78rem;color:var(--text-dim)">Due: {{ a.due_date|fmtdate }}</span>{% endif %}
+                        {% if a.schedule_start %}<span style="font-size:0.78rem;color:var(--text-dim)" data-i18n="scheduleStart">Opens</span> <span style="font-size:0.78rem;color:var(--text-dim)">{{ a.schedule_start|fmtdate_full }}</span>{% endif %}
+                        {% if a.schedule_end %}<span style="font-size:0.78rem;color:var(--text-dim)" data-i18n="scheduleEnd">Until</span> <span style="font-size:0.78rem;color:var(--text-dim)">{{ a.schedule_end|fmtdate_full }}</span>{% endif %}
                         {% if a.co_teachers %}
                         <span style="font-size:0.76rem;color:var(--listening)">
                             Co: {% for ct in a.co_teachers %}{{ ct.display_name }}{% if not loop.last %}, {% endif %}{% endfor %}

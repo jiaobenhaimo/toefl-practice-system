@@ -2,7 +2,7 @@
 {% block title %}Analytics — {{ site.name }}{% endblock %}
 
 {% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block body %}
@@ -103,20 +103,43 @@ function renderTrendChart(history) {
     var ctx = document.getElementById('chart-trend').getContext('2d');
     if (trendChart) trendChart.destroy();
     var c = getChartColors();
-    trendChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: history.map(function(h){ return h.date; }),
-            datasets: [{
-                label: 'Score %',
-                data: history.map(function(h){ return h.pct; }),
-                borderColor: c.accent,
+    var labels = history.map(function(h){ return h.date; });
+    var sectionColors = { reading: '#007aff', listening: '#34c759', writing: '#ff9500', speaking: '#af52de' };
+    var sectionNames = ['reading', 'listening', 'writing', 'speaking'];
+    var datasets = [];
+    sectionNames.forEach(function(sec) {
+        var values = history.map(function(h) {
+            return (h.section_bands && h.section_bands[sec] !== undefined) ? h.section_bands[sec] : null;
+        });
+        if (values.some(function(v) { return v !== null; })) {
+            datasets.push({
+                label: sec.charAt(0).toUpperCase() + sec.slice(1),
+                data: values,
+                borderColor: sectionColors[sec],
                 backgroundColor: 'transparent',
                 tension: 0.3,
-                pointRadius: 4,
-            }]
-        },
-        options: { responsive: true, scales: { y: Object.assign({ min: 0, max: 100 }, chartScaleOpts()), x: chartScaleOpts() }, plugins: { legend: { display: false } } }
+                pointRadius: 3,
+                spanGaps: true,
+                borderWidth: 2,
+            });
+        }
+    });
+    if (datasets.length === 0) {
+        datasets.push({
+            label: 'Overall',
+            data: history.map(function(h){ return h.band || h.pct; }),
+            borderColor: c.accent,
+            backgroundColor: 'transparent',
+            tension: 0.3,
+            pointRadius: 4,
+        });
+    }
+    trendChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: datasets },
+        options: { responsive: true,
+            scales: { y: Object.assign({ min: 1, max: 6, ticks: { stepSize: 1 } }, chartScaleOpts()), x: chartScaleOpts() },
+            plugins: { legend: { display: datasets.length > 1, position: 'bottom', labels: { boxWidth: 12, padding: 8 } } } }
     });
 }
 

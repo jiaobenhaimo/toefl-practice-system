@@ -2,7 +2,7 @@
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <div class="sidebar__header">
         <a href="/" class="sidebar__brand">
-            <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+            <svg width="24" height="24" viewBox="0 0 28 28" fill="none" aria-hidden="true">
                 <rect width="28" height="28" rx="6" fill="var(--accent)"/>
                 <path d="M7 9h14M7 14h10M7 19h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
             </svg>
@@ -12,64 +12,64 @@
     <nav class="sidebar__nav">
         {% if user and user.role == 'parent' %}
         <a href="/parent" class="sidebar__link" aria-label="My Child's Progress">
-            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
             <span data-i18n="navMyChild">My Child</span>
         </a>
         {% endif %}
         {% if user and user.role == 'student' %}
         <a href="/assignments" class="sidebar__link" aria-label="Assignments">
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 4h12v12H4z" stroke="currentColor" stroke-width="1.5" fill="none" rx="2"/><path d="M7 9l2 2 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4z" stroke="currentColor" stroke-width="1.5" fill="none" rx="2"/><path d="M7 9l2 2 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navAssignments">Assignments</span>
-            <span class="review-badge" id="notif-badge" style="display:none"></span>
+            <span class="review-badge" id="notif-badge" style="display:none" aria-live="polite"></span>
         </a>
         {% endif %}
         {% if not user or user.role != 'parent' %}
         <a href="/catalog" class="sidebar__link" aria-label="Test Library">
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             <span data-i18n="navTestLibrary">Test Library</span>
         </a>
         {% endif %}
         {% if user and user.role in ("admin","teacher") %}
         <a href="/dashboard" class="sidebar__link" aria-label="Analytics">
-            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="10" width="3" height="7" rx="1" fill="currentColor" opacity="0.4"/><rect x="8.5" y="6" width="3" height="11" rx="1" fill="currentColor" opacity="0.6"/><rect x="14" y="3" width="3" height="14" rx="1" fill="currentColor" opacity="0.8"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="10" width="3" height="7" rx="1" fill="currentColor" opacity="0.4"/><rect x="8.5" y="6" width="3" height="11" rx="1" fill="currentColor" opacity="0.6"/><rect x="14" y="3" width="3" height="14" rx="1" fill="currentColor" opacity="0.8"/></svg>
             <span data-i18n="navAnalytics">Analytics</span>
         </a>
         {% endif %}
         {% if user and user.role == 'student' %}
         <a href="/history" class="sidebar__link" aria-label="Result History">
-            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             <span data-i18n="navHistory">Result History</span>
         </a>
         <a href="/review-queue" class="sidebar__link" aria-label="Review Queue" id="review-queue-link">
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 10a6 6 0 0111.3-2.8M16 10a6 6 0 01-11.3 2.8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M15 4v3.2h-3.2M5 16v-3.2h3.2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10a6 6 0 0111.3-2.8M16 10a6 6 0 01-11.3 2.8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M15 4v3.2h-3.2M5 16v-3.2h3.2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navReview">Review</span>
-            <span class="review-badge" id="review-badge" style="display:none"></span>
+            <span class="review-badge" id="review-badge" style="display:none" aria-live="polite"></span>
         </a>
         {% endif %}
         {% if user and user.role in ('admin','teacher') %}
-        <div class="sidebar__divider"></div>
+        <div class="sidebar__divider" role="separator"></div>
         <a href="/teacher/results" class="sidebar__link" aria-label="Submissions">
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 15l4-6 3 3 4-5 3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15l4-6 3 3 4-5 3 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navSubmissions">Submissions</span>
         </a>
         <a href="/teacher/progress" class="sidebar__link" aria-label="Student Progress">
-            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="12" width="3" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="8.5" y="8" width="3" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="14" y="4" width="3" height="13" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="12" width="3" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="8.5" y="8" width="3" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="14" y="4" width="3" height="13" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
             <span data-i18n="navProgress">Progress Tracking</span>
         </a>
         {% endif %}
         {% if user and user.role == 'admin' %}
         <a href="/admin/users" class="sidebar__link" aria-label="Manage Users">
-            <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
             <span data-i18n="navUsers">Users</span>
         </a>
         {% endif %}
     </nav>
     <div class="sidebar__footer">
         <div class="sidebar__controls">
-            <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-nav">
-                <svg width="20" height="20" viewBox="0 0 20 20" id="theme-icon-nav"></svg>
+            <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-nav">
+                <svg width="20" height="20" viewBox="0 0 20 20" id="theme-icon-nav" aria-hidden="true"></svg>
             </button>
-            <button class="lang-toggle" onclick="toggleLang()" aria-label="Toggle language" id="lang-toggle-nav">
+            <button class="lang-toggle" type="button" onclick="toggleLang()" aria-label="Toggle language" id="lang-toggle-nav">
                 <span id="lang-label-nav"></span>
             </button>
         </div>
@@ -79,11 +79,11 @@
             {% if user.role != 'student' %}<span class="role-badge role-badge--{{ user.role }}" data-i18n-role="{{ user.role }}">{{ user.role }}</span>{% endif %}
         </div>
         <a href="/account" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Account settings">
-            <svg width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
             <span data-i18n="navAccount">Account</span>
         </a>
         <a href="/logout" class="sidebar__link sidebar__link--muted sidebar__link--footer" aria-label="Log out">
-            <svg width="18" height="18" viewBox="0 0 20 20"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4H5a1 1 0 00-1 1v10a1 1 0 001 1h2M10 14l4-4-4-4M14 10H8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navLogOut">Log out</span>
         </a>
         {% elif is_guest %}
@@ -91,7 +91,7 @@
             <span class="sidebar__user-name" data-i18n="navGuest">Guest</span>
         </div>
         <a href="/login" class="sidebar__link sidebar__link--footer" aria-label="Log in">
-            <svg width="18" height="18" viewBox="0 0 20 20"><path d="M13 4h2a1 1 0 011 1v10a1 1 0 01-1 1h-2M10 14l-4-4 4-4M6 10h8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M13 4h2a1 1 0 011 1v10a1 1 0 01-1 1h-2M10 14l-4-4 4-4M6 10h8" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span data-i18n="navLogIn">Log in</span>
         </a>
         {% endif %}
@@ -99,54 +99,82 @@
 </aside>
 
 <!-- Mobile hamburger button -->
-<button class="hamburger" id="hamburger" onclick="document.getElementById('sidebar').classList.toggle('sidebar--open'); document.getElementById('sidebar-overlay').classList.toggle('sidebar-overlay--active')" aria-label="Open menu">
-    <svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+<button class="hamburger" id="hamburger" type="button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 </button>
 {% if announcement %}
-<div class="announcement-banner" id="announcement-banner">
+<div class="announcement-banner" id="announcement-banner" role="status">
     <span class="announcement-banner__text">{{ announcement.content }}</span>
     <span class="announcement-banner__meta">— {{ announcement.display_name }}, {{ announcement.created_at|fmtdate }}</span>
 </div>
 {% endif %}
-<div class="sidebar-overlay" id="sidebar-overlay" onclick="document.getElementById('sidebar').classList.remove('sidebar--open'); this.classList.remove('sidebar-overlay--active')"></div>
+<div class="sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
 
 <script>
-// Set lang label + highlight active sidebar link
-document.addEventListener('DOMContentLoaded', function() {
-    var lbl = document.getElementById('lang-label-nav');
-    if (lbl) lbl.textContent = window._lang === 'zh' ? 'EN' : '中文';
-    var path = location.pathname;
-    document.querySelectorAll('.sidebar__link').forEach(function(a) {
-        var href = a.getAttribute('href');
-        if (!href || href === '/') return;
-        // Exact match for top-level, startsWith for sub-pages
-        if (path === href || (href.length > 1 && path.startsWith(href + '/'))) {
-            a.classList.add('sidebar__link--active');
-        }
+(function() {
+    // Sidebar open/close with aria-expanded, backdrop dismissal, Escape-to-close.
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebar-overlay');
+    var hamburger = document.getElementById('hamburger');
+    function setOpen(open) {
+        sidebar.classList.toggle('sidebar--open', open);
+        overlay.classList.toggle('sidebar-overlay--active', open);
+        hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        document.body.style.overflow = open ? 'hidden' : '';
+    }
+    if (hamburger) hamburger.addEventListener('click', function() {
+        setOpen(!sidebar.classList.contains('sidebar--open'));
     });
-    // Review badge polling for students
-    var badge = document.getElementById('review-badge');
-    if (badge) {
-        function updateBadge() {
+    if (overlay) overlay.addEventListener('click', function() { setOpen(false); });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && sidebar.classList.contains('sidebar--open')) setOpen(false);
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var lbl = document.getElementById('lang-label-nav');
+        if (lbl) lbl.textContent = window._lang === 'zh' ? 'EN' : '中文';
+        // Highlight active link
+        var path = location.pathname;
+        document.querySelectorAll('.sidebar__link').forEach(function(a) {
+            var href = a.getAttribute('href');
+            if (!href || href === '/') return;
+            if (path === href || (href.length > 1 && path.startsWith(href + '/'))) {
+                a.classList.add('sidebar__link--active');
+                a.setAttribute('aria-current', 'page');
+            }
+        });
+        // Unified badge polling: one endpoint would be nicer but we keep existing APIs.
+        // Use visibilitychange to pause polling when tab is hidden (saves bandwidth + battery).
+        var badge = document.getElementById('review-badge');
+        var notifBadge = document.getElementById('notif-badge');
+        var reviewTimer = null, notifTimer = null;
+        function updateReview() {
+            if (!badge) return;
             fetch('/api/review-count').then(function(r) { return r.json(); }).then(function(data) {
                 if (data.count > 0) { badge.textContent = data.count; badge.style.display = ''; }
                 else { badge.style.display = 'none'; }
             }).catch(function() {});
         }
-        updateBadge();
-        setInterval(updateBadge, 60000); // Refresh every minute
-    }
-    // Notification badge polling for students
-    var notifBadge = document.getElementById('notif-badge');
-    if (notifBadge) {
-        function updateNotifBadge() {
+        function updateNotif() {
+            if (!notifBadge) return;
             fetch('/api/notifications').then(function(r) { return r.json(); }).then(function(data) {
                 if (data.count > 0) { notifBadge.textContent = data.count; notifBadge.style.display = ''; }
                 else { notifBadge.style.display = 'none'; }
             }).catch(function() {});
         }
-        updateNotifBadge();
-        setInterval(updateNotifBadge, 60000);
-    }
-});
+        function startPolling() {
+            if (badge && !reviewTimer) { updateReview(); reviewTimer = setInterval(updateReview, 60000); }
+            if (notifBadge && !notifTimer) { updateNotif(); notifTimer = setInterval(updateNotif, 60000); }
+        }
+        function stopPolling() {
+            if (reviewTimer) { clearInterval(reviewTimer); reviewTimer = null; }
+            if (notifTimer) { clearInterval(notifTimer); notifTimer = null; }
+        }
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') startPolling();
+            else stopPolling();
+        });
+        startPolling();
+    });
+})();
 </script>

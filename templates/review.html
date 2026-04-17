@@ -4,7 +4,7 @@
 {% block body %}
 <div id="app" class="test-page">
     <div id="review-loading" class="screen screen--active">
-        <div class="loading-msg">Loading review…</div>
+        <div class="loading-msg" data-i18n="loadingDots">Loading review…</div>
     </div>
 
     <div id="review-main" class="screen">
@@ -379,7 +379,7 @@ function renderPage() {
 
     // Nav
     document.getElementById('rv-prev').style.display = _pageIdx > 0 ? '' : 'none';
-    document.getElementById('rv-next').textContent = _pageIdx < _allPages.length - 1 ? 'Next →' : 'Done';
+    document.getElementById('rv-next').textContent = _pageIdx < _allPages.length - 1 ? t('nextArrow') : t('done');
     updateDots();
 }
 

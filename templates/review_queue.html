@@ -123,7 +123,7 @@ function showQuestion() {
         document.getElementById('review-mc-choices').innerHTML = html;
     } else if (qd.type === 'cloze') {
         document.getElementById('review-cloze').style.display = '';
-        document.getElementById('review-cloze-prompt').innerHTML = 'Fill in the blank: <strong>' + esc(qd.full_word || '???') + '</strong>';
+        document.getElementById('review-cloze-prompt').innerHTML = t('fillBlank') + ' <strong>' + esc(qd.full_word || '???') + '</strong>';
         document.getElementById('review-cloze-input').value = '';
         document.getElementById('review-cloze-input').focus();
     } else if (qd.type === 'build_sentence') {
@@ -131,7 +131,7 @@ function showQuestion() {
         var details = qd.details || {};
         document.getElementById('review-build-context').innerHTML = esc(details.context || '');
         var words = (details.words || []).join(' / ');
-        document.getElementById('review-build-words').innerHTML = 'Words: <strong>' + esc(words) + '</strong>';
+        document.getElementById('review-build-words').innerHTML = t('wordsLabel') + ' <strong>' + esc(words) + '</strong>';
         document.getElementById('review-build-input').value = '';
         document.getElementById('review-build-input').focus();
     }
@@ -191,12 +191,23 @@ function nextReview() {
     showQuestion();
 }
 
-// Enter key submits for cloze/build
+// Enter: advance to next question if already answered, otherwise submit
 document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Enter' || _answered) return;
-    if (document.getElementById('review-cloze').style.display !== 'none') submitCloze();
-    else if (document.getElementById('review-build').style.display !== 'none') submitBuild();
-    else if (_answered) nextReview();
+    if (e.key !== 'Enter') return;
+    // Don't interfere with modals/forms outside the review card
+    if (e.target.closest && e.target.closest('#hig-confirm-overlay')) return;
+    if (_answered) {
+        e.preventDefault();
+        nextReview();
+        return;
+    }
+    if (document.getElementById('review-cloze').style.display !== 'none') {
+        e.preventDefault();
+        submitCloze();
+    } else if (document.getElementById('review-build').style.display !== 'none') {
+        e.preventDefault();
+        submitBuild();
+    }
 });
 
 document.addEventListener('DOMContentLoaded', loadQueue);

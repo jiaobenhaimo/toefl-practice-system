@@ -71,13 +71,28 @@ def csrf_check():
     if request.method != 'POST':
         return
     if request.is_json:
-        # JSON APIs: validate Origin header to prevent cross-site requests
+        # JSON APIs: require same-origin via Origin header OR a matching X-CSRF-Token.
+        # SameSite=Lax blocks cross-site form POSTs at the browser level, but JSON fetches
+        # from other origins would still be blocked by CORS unless allowed — defense in depth here.
         origin = request.headers.get('Origin', '')
+        host = request.host.split(':')[0]
+        origin_ok = False
         if origin:
             parsed = urlparse(origin)
-            host = request.host.split(':')[0]
-            if parsed.hostname and parsed.hostname != host and parsed.hostname != 'localhost':
-                abort(403)
+            if parsed.hostname and (parsed.hostname == host or parsed.hostname == 'localhost' or parsed.hostname == '127.0.0.1'):
+                origin_ok = True
+        else:
+            # No Origin header: fall back to Referer check
+            referer = request.headers.get('Referer', '')
+            if referer:
+                parsed = urlparse(referer)
+                if parsed.hostname and (parsed.hostname == host or parsed.hostname == 'localhost' or parsed.hostname == '127.0.0.1'):
+                    origin_ok = True
+        # Accept a valid X-CSRF-Token as an alternative (useful for native clients)
+        header_token = request.headers.get('X-CSRF-Token', '')
+        token_ok = header_token and header_token == session.get('_csrf')
+        if not (origin_ok or token_ok):
+            abort(403)
     else:
         # Form/multipart POSTs: require CSRF token
         token = request.form.get('_csrf', '')
@@ -86,13 +101,43 @@ def csrf_check():
 
 # ===== Shared helpers =====
 
+# Per-process cache for merged explanations. Key = test_id. Value = (signature, merged_dict).
+# Invalidated when any of the test's .md files changes or when DB explanations are saved.
+_expl_cache = {}
+_expl_db_version = {'v': 0}
+
+def _invalidate_expl_cache_for_test(test_id=None):
+    """Bump DB version so cached md+db merges are rebuilt on next load."""
+    _expl_db_version['v'] += 1
+    if test_id is not None:
+        _expl_cache.pop(test_id, None)
+
 def _load_merged_explanations(test_id, test_info=None):
     """Load and merge markdown + DB explanations for a test.
-    DB explanations override markdown ones. Returns dict {qid: html}."""
-    db_expl = db.get_explanations(test_id)
+    DB explanations override markdown ones. Returns dict {qid: html}.
+
+    Cached per-process; invalidated when any source .md file mtime changes
+    or when DB explanations are updated via save_explanation."""
     if not test_info:
         tests = cached_scan()
         test_info = tests.get(test_id)
+    # Build cache signature: all relevant file mtimes + DB version
+    mtimes = []
+    if test_info:
+        seen = set()
+        for mi in test_info['modules']:
+            fn = mi['filename']
+            if fn in seen: continue
+            seen.add(fn)
+            fp = safe_path(TESTS_DIR, fn)
+            if fp and os.path.exists(fp):
+                try: mtimes.append(os.path.getmtime(fp))
+                except OSError: pass
+    sig = (tuple(sorted(mtimes)), _expl_db_version['v'])
+    cached = _expl_cache.get(test_id)
+    if cached and cached[0] == sig:
+        return cached[1]
+    db_expl = db.get_explanations(test_id)
     md_expl = {}
     if test_info:
         seen = set()
@@ -111,6 +156,7 @@ def _load_merged_explanations(test_id, test_info=None):
     merged = {**md_expl}
     for qid, expl in db_expl.items():
         merged[qid] = md_html(str(html_escape(expl)))
+    _expl_cache[test_id] = (sig, merged)
     return merged
 
 def _enrich_results_with_bands(results):
@@ -187,7 +233,8 @@ def assignments():
     completed_keys = db.get_completed_test_keys(u['id'])
     pending = [a for a in my_assignments if (a['test_id'], a.get('section')) not in completed_keys]
     return render_template('assignments.html', assignments=pending, tests=tests, user=u,
-        now_date=dt.utcnow().strftime('%Y-%m-%d'))
+        now_date=dt.utcnow().strftime('%Y-%m-%d'),
+        now_iso=dt.utcnow().strftime('%Y-%m-%dT%H:%M'))
 
 @app.route('/api/module/<filename>')
 def api_module(filename):
@@ -396,6 +443,16 @@ def api_session_start():
     section = data.get('section') or None
     practice = data.get('practice', False)
     playlist = data.get('playlist', [])
+    # Schedule enforcement: block if student has a scheduled assignment outside its window
+    if u['role'] == 'student' and not practice:
+        my_assignments = db.get_assignments(student_id=u['id'])
+        for a in my_assignments:
+            if a['test_id'] == test_id and (not section or a.get('section') == section):
+                now = dt.utcnow().strftime('%Y-%m-%dT%H:%M')
+                if a.get('schedule_start') and a['schedule_start'] > now:
+                    return jsonify({'error': 'not_yet_available', 'message': 'This test is not available yet.'}), 403
+                if a.get('schedule_end') and a['schedule_end'] < now:
+                    return jsonify({'error': 'schedule_expired', 'message': 'The schedule for this test has ended.'}), 403
     # Check for existing active session
     existing = db.get_active_session(u['id'], test_id, mode, section, practice)
     if existing:
@@ -562,6 +619,18 @@ def take_test(test_id):
     if not u and not is_guest: return redirect('/login')
     tests = cached_scan()
     if test_id not in tests: abort(404)
+    # Schedule enforcement: if student has a scheduled assignment, check time window
+    if u and u['role'] == 'student':
+        my_assignments = db.get_assignments(student_id=u['id'])
+        for a in my_assignments:
+            if a['test_id'] == test_id:
+                now = dt.utcnow().strftime('%Y-%m-%dT%H:%M')
+                if a.get('schedule_start') and a['schedule_start'] > now:
+                    flash('This test is not available yet. It opens at ' + fmtdate_full(a['schedule_start']))
+                    return redirect('/assignments')
+                if a.get('schedule_end') and a['schedule_end'] < now:
+                    flash('The schedule for this test has ended.')
+                    return redirect('/assignments')
     return render_template('test.html', test_info=tests[test_id], user=u, is_guest=is_guest)
 
 @app.route('/audio/<path:filepath>')
@@ -749,7 +818,11 @@ def teacher_assign():
     tid = request.form.get('test_id','')
     sec = request.form.get('section','').strip() or None
     due = request.form.get('due_date','').strip() or None
-    if sid and tid: db.assign_test(cur_user()['id'], sid, tid, sec, due); flash('Test assigned')
+    sched_start = request.form.get('schedule_start','').strip() or None
+    sched_end = request.form.get('schedule_end','').strip() or None
+    if sid and tid:
+        db.assign_test(cur_user()['id'], sid, tid, sec, due, sched_start, sched_end)
+        flash('Test assigned')
     return redirect('/teacher/progress')
 
 @app.route('/teacher/assign/<int:aid>/delete', methods=['POST'])
@@ -1139,23 +1212,33 @@ def api_analytics(uid):
         student = db.get_linked_student(u['id'])
         if not student or student['id'] != uid: abort(403)
     results = db.get_analytics(uid)
+    # Batch-load rubric scores for band calculation
+    result_ids = [r['id'] for r in results]
+    rubric_map_all = db.batch_get_rubric_scores(result_ids) if result_ids else {}
     score_history = []
     section_totals = {}
     section_correct = {}
     for r in results:
         sections = parse_json(r['sections_json'])
+        rubric_for_result = rubric_map_all.get(r['id'], {})
         if r['total_questions'] > 0:
             pct = round(r['total_correct'] / r['total_questions'] * 100)
-            # Calculate band from auto-graded sections
-            bands = []
+            # Calculate per-section bands for this test result
+            section_bands_for_test = {}
             for sec in sections:
                 s = sec.get('section', '')
-                sc = sec.get('score', {})
-                if s in ('reading', 'listening') and sc.get('total', 0) > 0:
-                    band = lookup_band(_RL_BAND_TABLE, sc.get('correct', 0) / sc.get('total', 1) * 30)
-                    bands.append(band)
-            avg_band = round(sum(bands) / len(bands) * 2) / 2 if bands else None
-            score_history.append({'date': r['date'][:10], 'pct': pct, 'band': avg_band, 'name': r['test_name'] or r['test_id']})
+                band = section_band(s, sec.get('details', []), rubric_for_result)
+                if band is not None:
+                    section_bands_for_test[s] = band
+            # Overall band = average of available section bands
+            avg_band = None
+            if section_bands_for_test:
+                avg_band = round(sum(section_bands_for_test.values()) / len(section_bands_for_test) * 2) / 2
+            score_history.append({
+                'date': r['date'][:10], 'pct': pct, 'band': avg_band,
+                'name': r['test_name'] or r['test_id'],
+                'section_bands': section_bands_for_test,
+            })
         for sec in sections:
             s = sec.get('section', 'unknown')
             sc = sec.get('score', {})
@@ -1216,6 +1299,7 @@ def api_save_explanation(test_id):
     data = request.get_json()
     if not data: abort(400)
     db.save_explanation(test_id, data.get('question_id', ''), data.get('explanation', ''), u['id'])
+    _invalidate_expl_cache_for_test(test_id)
     return jsonify({'ok': True})
 
 # ===== PDF =====
@@ -1449,6 +1533,110 @@ def api_mark_read():
     ids = data.get('ids')
     db.mark_notifications_read(u['id'], ids)
     return jsonify({'ok': True})
+
+
+# ===== Native Client API =====
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """JSON login for native clients. Returns user info on success."""
+    data = request.get_json()
+    if not data: abort(400)
+    ip = request.remote_addr or '0.0.0.0'
+    if check_rate_limit(ip):
+        return jsonify({'ok': False, 'error': 'rate_limited'}), 429
+    record_attempt(ip)
+    u = db.authenticate(data.get('username', '').strip(), data.get('password', ''))
+    if not u:
+        return jsonify({'ok': False, 'error': 'invalid_credentials'}), 401
+    session.clear()
+    session['user_id'] = u['id']
+    session.permanent = True
+    return jsonify({'ok': True, 'user': {
+        'id': u['id'], 'username': u['username'],
+        'display_name': u['display_name'], 'role': u['role'],
+    }})
+
+@app.route('/api/auth/me')
+def api_me():
+    """Get current authenticated user info."""
+    u = cur_user()
+    if not u:
+        return jsonify({'ok': False, 'error': 'not_authenticated'}), 401
+    return jsonify({'ok': True, 'user': {
+        'id': u['id'], 'username': u['username'],
+        'display_name': u['display_name'], 'role': u['role'],
+    }})
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """JSON logout for native clients."""
+    session.clear()
+    return jsonify({'ok': True})
+
+@app.route('/api/catalog')
+def api_catalog():
+    """Get test catalog as JSON for native clients."""
+    u = cur_user(); is_guest = session.get('guest', False)
+    if not u and not is_guest: return jsonify({'ok': False}), 401
+    tests = cached_scan()
+    result = []
+    for tid, t in tests.items():
+        sections = list(dict.fromkeys(m['section'] for m in t['modules']))
+        total_minutes = sum(m.get('timer_minutes', 0) for m in t['modules'])
+        result.append({
+            'test_id': tid, 'test_name': t['test_name'],
+            'sections': sections, 'total_minutes': total_minutes,
+            'modules': t['modules'],
+        })
+    return jsonify({'ok': True, 'tests': result})
+
+@app.route('/api/my-assignments')
+@require_login
+def api_my_assignments():
+    """Get current student's pending assignments as JSON."""
+    u = cur_user()
+    my_assignments = db.get_assignments(student_id=u['id'])
+    tests = cached_scan()
+    completed_keys = db.get_completed_test_keys(u['id'])
+    pending = [a for a in my_assignments if (a['test_id'], a.get('section')) not in completed_keys]
+    result = []
+    for a in pending:
+        t = tests.get(a['test_id'])
+        result.append({
+            'id': a['id'], 'test_id': a['test_id'],
+            'test_name': t['test_name'] if t else a['test_id'],
+            'section': a.get('section'), 'due_date': a.get('due_date'),
+            'assigned_at': a['assigned_at'],
+            'schedule_start': a.get('schedule_start'),
+            'schedule_end': a.get('schedule_end'),
+            'sections': list(dict.fromkeys(m['section'] for m in t['modules'])) if t else [],
+            'modules': t['modules'] if t else [],
+        })
+    return jsonify({'ok': True, 'assignments': result})
+
+@app.route('/api/my-history')
+@require_login
+def api_my_history():
+    """Get current user's result history with band scores."""
+    u = cur_user()
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    total = db.count_results(user_id=u['id'])
+    results = db.get_results(user_id=u['id'], limit=per_page, offset=(page-1)*per_page)
+    _enrich_results_with_bands(results)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    items = []
+    for r in results:
+        items.append({
+            'id': r['id'], 'test_id': r['test_id'], 'test_name': r.get('test_name', ''),
+            'practice': bool(r['practice']), 'date': r['date'],
+            'total_correct': r['total_correct'], 'total_questions': r['total_questions'],
+            'band_overall': r.get('band_overall'),
+            'band_sections': r.get('band_sections', {}),
+            'needs_rubric': r.get('needs_rubric', False),
+        })
+    return jsonify({'ok': True, 'results': items, 'page': page, 'total_pages': total_pages})
 
 
 # ===== Init =====
