@@ -223,19 +223,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Server-side session for logged-in users
     if (isLoggedIn) {
-        try {
-            const resp = await fetch('/api/session/start', {
+        // Single shared request shape — was duplicated three times in the original flow.
+        const sessionStartBody = {
+            test_id: TEST_INFO.test_id,
+            mode: mode,
+            section: URL_PARAMS.section || null,
+            practice: isPracticeMode,
+            playlist: playlist,
+        };
+        async function startServerSession() {
+            const r = await fetch('/api/session/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    test_id: TEST_INFO.test_id,
-                    mode: mode,
-                    section: URL_PARAMS.section || null,
-                    practice: isPracticeMode,
-                    playlist: playlist,
-                }),
+                body: JSON.stringify(sessionStartBody),
             });
-            const sess = await resp.json();
+            return r.json();
+        }
+        async function discardAndStartFresh(oldSid) {
+            await fetch('/api/session/' + oldSid, { method: 'DELETE' });
+            return startServerSession();
+        }
+        try {
+            let sess = await startServerSession();
             serverSessionId = sess.session_id;
             if (sess.resumed && sess.playlist_idx !== undefined) {
                 const resumeIdx = sess.playlist_idx;
@@ -247,38 +256,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                         _serverModuleState = sess;
                     } else {
                         // User declined resume — delete old session and create new
-                        await fetch('/api/session/' + serverSessionId, { method: 'DELETE' });
-                        const newResp = await fetch('/api/session/start', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                test_id: TEST_INFO.test_id,
-                                mode: mode,
-                                section: URL_PARAMS.section || null,
-                                practice: isPracticeMode,
-                                playlist: playlist,
-                            }),
-                        });
-                        const newSess = await newResp.json();
-                        serverSessionId = newSess.session_id;
+                        sess = await discardAndStartFresh(serverSessionId);
+                        serverSessionId = sess.session_id;
                         _serverModuleState = null;
                     }
                 } else if (resumeIdx >= playlist.length) {
-                    // Previous session was completed — clean up
-                    await fetch('/api/session/' + serverSessionId, { method: 'DELETE' });
-                    const newResp = await fetch('/api/session/start', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            test_id: TEST_INFO.test_id,
-                            mode: mode,
-                            section: URL_PARAMS.section || null,
-                            practice: isPracticeMode,
-                            playlist: playlist,
-                        }),
-                    });
-                    const newSess = await newResp.json();
-                    serverSessionId = newSess.session_id;
+                    // Previous session was completed — clean up and start fresh
+                    sess = await discardAndStartFresh(serverSessionId);
+                    serverSessionId = sess.session_id;
                     _serverModuleState = null;
                 } else {
                     // playlist_idx is 0, module-level resume
@@ -837,10 +822,11 @@ function renderCloze(body, page) {
     allChars.forEach((inp, i) => {
         inp.addEventListener('input', () => {
             if (inp.value.length === 1) {
-                // Advance to next character input
-                const next = allChars[i + 1] || allChars[0];
-                next.focus();
-                next.select();
+                // Advance to the next input, but stop at the last one — don't wrap back to the
+                // first, which is disorienting when the student has just finished the last blank.
+                const next = allChars[i + 1];
+                if (next) { next.focus(); next.select(); }
+                else inp.blur();
             }
         });
         inp.addEventListener('keydown', (e) => {
@@ -1201,29 +1187,12 @@ function sleep(ms) {
 
 let _pendingStop = null; // Shared Promise for in-progress recording stop
 
-function stopRecordingAndSave() {
-    stopQuestionTimer();
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        // Start the stop — the shared promise lets stopRecording() await it too
-        _pendingStop = new Promise(resolve => {
-            const origOnStop = mediaRecorder.onstop;
-            mediaRecorder.onstop = (e) => {
-                if (origOnStop) origOnStop(e);
-                isRecording = false;
-                _pendingStop = null;
-                resolve();
-            };
-            mediaRecorder.stop();
-        });
-    }
-    isRecording = false;
-}
-
-function stopRecording() {
-    stopQuestionTimer();
-    // If a stop is already in progress (e.g. timer expired), wait for it
+// Internal: kicks off MediaRecorder.stop() and returns a Promise that resolves when the
+// onstop handler has fired (preserving whatever handler startAutoRecord assigned for
+// saving the blob). Re-entrant: subsequent callers await the same Promise.
+function _beginStop() {
     if (_pendingStop) return _pendingStop;
-    if (!isRecording || !mediaRecorder || mediaRecorder.state === 'inactive') {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') {
         isRecording = false;
         return Promise.resolve();
     }
@@ -1239,6 +1208,16 @@ function stopRecording() {
     });
     isRecording = false;
     return _pendingStop;
+}
+
+function stopRecordingAndSave() {
+    stopQuestionTimer();
+    _beginStop();
+}
+
+function stopRecording() {
+    stopQuestionTimer();
+    return _beginStop();
 }
 
 function setNextButtonEnabled(enabled) {
@@ -1261,7 +1240,7 @@ function createAudioPlayer(src, options) {
     if (isPracticeMode) {
         const audioEl = document.createElement('audio');
         audioEl.preload = 'auto';
-        audioEl.src = '/audio/' + currentModule.audioDir + '/' + src + '.ogg';
+        audioEl.src = '/audio/' + encodeURIComponent(currentModule.audioDir) + '/' + encodeURIComponent(src) + '.ogg';
         audioEl.controls = true;
         note.textContent = src + '.ogg';
         wrap.appendChild(audioEl);
@@ -1284,7 +1263,7 @@ function createAudioPlayer(src, options) {
 
     const audioEl = document.createElement('audio');
     audioEl.preload = 'auto';
-    audioEl.src = '/audio/' + currentModule.audioDir + '/' + src + '.ogg';
+    audioEl.src = '/audio/' + encodeURIComponent(currentModule.audioDir) + '/' + encodeURIComponent(src) + '.ogg';
     audioEl.controls = false;
     wrap.appendChild(audioEl);
 

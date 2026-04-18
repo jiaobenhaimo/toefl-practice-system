@@ -151,6 +151,18 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,       -- SHA-256 hex of the plaintext token
+    name TEXT NOT NULL DEFAULT '',         -- Human label, e.g. "MacBook Pro"
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT DEFAULT NULL,
+    expires_at TEXT DEFAULT NULL,          -- NULL = never expires
+    revoked INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 """
 
 
@@ -227,6 +239,8 @@ def init_db(config=None):
     CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comments_result ON teacher_comments(result_id);
     CREATE INDEX IF NOT EXISTS idx_error_bank_user_review ON error_bank(user_id, next_review);
+    CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, revoked);
     """)
     # Create default admin account if none exists
     admin = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
@@ -950,4 +964,99 @@ def mark_notifications_read(user_id, notification_ids=None):
         )
     else:
         conn.execute("UPDATE notifications SET read=1 WHERE user_id=?", (user_id,))
+    conn.commit()
+
+
+# ===== API Tokens (Bearer auth for native clients) =====
+
+import hashlib
+from datetime import datetime as _dt
+
+def _hash_token(plaintext):
+    """SHA-256 of the plaintext token. Stored at rest so a DB leak doesn't expose tokens."""
+    return hashlib.sha256(plaintext.encode('utf-8')).hexdigest()
+
+
+def create_api_token(user_id, plaintext_token, name='', expires_at=None):
+    """Store a newly issued token. Caller generates the plaintext and shows it ONCE to the user.
+    Returns the token id.
+    `expires_at`: ISO datetime string or None for no expiry.
+    """
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO api_tokens (user_id, token_hash, name, expires_at) VALUES (?, ?, ?, ?)",
+        (user_id, _hash_token(plaintext_token), name, expires_at)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def lookup_token(plaintext_token):
+    """Return {user_id, token_id, role, ...} if the token is valid (exists, not revoked,
+    not expired). Returns None otherwise. Also updates last_used_at (best-effort)."""
+    if not plaintext_token:
+        return None
+    th = _hash_token(plaintext_token)
+    conn = get_db()
+    row = conn.execute(
+        "SELECT t.id AS token_id, t.user_id, t.expires_at, t.revoked, "
+        "u.username, u.display_name, u.role "
+        "FROM api_tokens t JOIN users u ON t.user_id = u.id "
+        "WHERE t.token_hash = ?",
+        (th,)
+    ).fetchone()
+    if not row:
+        return None
+    if row['revoked']:
+        return None
+    if row['expires_at']:
+        try:
+            # ISO format; compare as strings works for YYYY-MM-DD... sortable.
+            # datetime.utcnow() is deprecated in 3.12+; use timezone-aware UTC and strip tzinfo
+            # to match the naive UTC strings used when issuing tokens (see app.py api_auth_token).
+            from datetime import timezone
+            now_utc = _dt.now(timezone.utc).replace(tzinfo=None).isoformat(sep=' ', timespec='seconds')
+            if row['expires_at'] < now_utc:
+                return None
+        except Exception:
+            pass
+    # Best-effort last_used_at update. Not commit-critical.
+    try:
+        conn.execute("UPDATE api_tokens SET last_used_at=datetime('now') WHERE id=?",
+                     (row['token_id'],))
+        conn.commit()
+    except Exception:
+        pass
+    d = dict(row)
+    # Return full user dict shape so cur_user() consumers don't break
+    d['id'] = d['user_id']
+    return d
+
+
+def list_api_tokens(user_id):
+    """List tokens for a user (token_hash omitted). Plaintext is never recoverable."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, name, created_at, last_used_at, expires_at, revoked "
+        "FROM api_tokens WHERE user_id=? ORDER BY created_at DESC",
+        (user_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def revoke_api_token(user_id, token_id):
+    """Revoke one of the user's tokens. Returns True if a row changed."""
+    conn = get_db()
+    cur = conn.execute(
+        "UPDATE api_tokens SET revoked=1 WHERE id=? AND user_id=?",
+        (token_id, user_id)
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def revoke_all_api_tokens(user_id):
+    """Revoke every token for a user (e.g. on password change)."""
+    conn = get_db()
+    conn.execute("UPDATE api_tokens SET revoked=1 WHERE user_id=? AND revoked=0", (user_id,))
     conn.commit()

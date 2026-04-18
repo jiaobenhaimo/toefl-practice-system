@@ -10,7 +10,6 @@ from flask import (
     send_from_directory, abort, redirect, flash, send_file, g
 )
 from markupsafe import escape as html_escape
-from parser import build_question_list
 
 # Pre-compiled regex for grading and sanitization
 _RE_PUNCT = re.compile(r'[?!.]')
@@ -19,22 +18,42 @@ _RE_SAFE_QID = re.compile(r'[^a-zA-Z0-9.\-]')
 import database as db
 from helpers import (
     SITE_CONFIG, TESTS_DIR, RECORDINGS_DIR,
-    cached_parse, cached_scan, md_html, pages_to_html, safe_path,
+    cached_parse, cached_scan, cached_build_pages, md_html, pages_to_html, safe_path,
     cur_user, parse_json, get_result_or_403,
     require_login, require_role,
     fmtdate, fmtdate_full,
     check_rate_limit, record_attempt,
-    lookup_band, section_band,
+    lookup_band,
     _RL_BAND_TABLE, _WRITING_BAND_TABLE,
     compute_result_bands,
 )
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+if not os.environ.get('SECRET_KEY'):
+    import sys
+    print('WARNING: SECRET_KEY not set — using an ephemeral key. '
+          'All existing sessions will be invalidated on next restart. '
+          'Set SECRET_KEY environment variable for production.', file=sys.stderr)
 app.config['PERMANENT_SESSION_LIFETIME'] = 60 * 60 * 24 * 31
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB upload limit
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Production: set TOEFL_BEHIND_HTTPS=1 when served behind HTTPS (recommended). This
+# enables the Secure flag on session cookies.
+if os.environ.get('TOEFL_BEHIND_HTTPS', '').lower() in ('1', 'true', 'yes'):
+    app.config['SESSION_COOKIE_SECURE'] = True
+    # Honor X-Forwarded-Proto from trusted reverse proxy (nginx/caddy) so url_for
+    # generates https:// URLs correctly.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
+
+# Comma-separated list of allowed CORS origins. e.g. "https://toefl.example.com"
+# Leave empty to disable CORS entirely (same-origin only). The server still accepts
+# token-authenticated requests from any origin by default because tokens are
+# explicit credentials that users manage — but the browser preflight will fail
+# unless the origin is allow-listed.
+_CORS_ORIGINS = [o.strip() for o in os.environ.get('CORS_ORIGINS', '').split(',') if o.strip()]
 
 @app.teardown_appcontext
 def _close_db(exc):
@@ -45,13 +64,44 @@ def _security_headers(response):
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
     response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    # CORS: only apply to /api/ routes. Allow credentials only for whitelisted origins.
+    if request.path.startswith('/api/') and _CORS_ORIGINS:
+        origin = request.headers.get('Origin', '')
+        if origin in _CORS_ORIGINS:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Vary'] = 'Origin'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-API-Token, X-CSRF-Token'
+            response.headers['Access-Control-Max-Age'] = '3600'
     return response
+
+
+@app.route('/api/<path:_any>', methods=['OPTIONS'])
+def _cors_preflight(_any):
+    """Handle CORS preflight for any /api/ route that doesn't already declare OPTIONS.
+    Flask auto-adds OPTIONS to every route, so this only fires for paths no other
+    handler matches — but the `after_request` CORS hook runs either way."""
+    return ('', 204)
 
 @app.context_processor
 def inject_config():
-    if not hasattr(g, '_announcement'):
-        g._announcement = db.get_active_announcement()
-    return {'site': SITE_CONFIG.get('site', {}), 'config': SITE_CONFIG, 'announcement': g._announcement}
+    # Announcement used to hit the DB on every request. Cache for 30s per worker; the
+    # announcement is published/dismissed manually and near-real-time is fine. The
+    # existing g._announcement guard still prevented multiple queries within one request,
+    # but didn't help across requests.
+    now = _time.time()
+    if _announcement_cache['ts'] + 30 < now:
+        _announcement_cache['v'] = db.get_active_announcement()
+        _announcement_cache['ts'] = now
+    return {'site': SITE_CONFIG.get('site', {}), 'config': SITE_CONFIG, 'announcement': _announcement_cache['v']}
+
+# Per-process announcement cache. Reset when an announcement is posted or dismissed.
+_announcement_cache = {'v': None, 'ts': 0.0}
+import time as _time
+
+def _invalidate_announcement_cache():
+    _announcement_cache['ts'] = 0.0
 
 app.template_filter('fmtdate')(fmtdate)
 app.template_filter('fmtdate_full')(fmtdate_full)
@@ -68,12 +118,25 @@ def inject_csrf():
 
 @app.before_request
 def csrf_check():
-    if request.method != 'POST':
+    # CSRF is only relevant for mutating methods. Safe methods (GET/HEAD) and
+    # CORS preflight (OPTIONS) bypass the check.
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        return
+    # Endpoints used as the bootstrap for credential-gated auth must be reachable
+    # without a prior session or token. They are protected by password + rate limit.
+    if request.path in ('/api/auth/login', '/api/auth/token'):
+        return
+    # Token-authenticated requests do not need CSRF protection: a bearer token
+    # cannot be attached to a request by a malicious cross-site page (no cookie,
+    # no ambient credentials). Only session-cookie auth is vulnerable to CSRF.
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer ') or request.headers.get('X-API-Token'):
         return
     if request.is_json:
-        # JSON APIs: require same-origin via Origin header OR a matching X-CSRF-Token.
-        # SameSite=Lax blocks cross-site form POSTs at the browser level, but JSON fetches
-        # from other origins would still be blocked by CORS unless allowed — defense in depth here.
+        # JSON APIs with session cookie auth: require same-origin via Origin header OR
+        # a matching X-CSRF-Token. SameSite=Lax blocks cross-site form POSTs at the
+        # browser level, but JSON fetches from other origins would still be blocked by
+        # CORS unless allowed — defense in depth here.
         origin = request.headers.get('Origin', '')
         host = request.host.split(':')[0]
         origin_ok = False
@@ -148,8 +211,8 @@ def _load_merged_explanations(test_id, test_info=None):
             fp = safe_path(TESTS_DIR, fn)
             if fp and os.path.exists(fp):
                 parsed = cached_parse(fp)
-                for mod in parsed['modules']:
-                    for pg in build_question_list(mod):
+                for mod_idx, mod in enumerate(parsed['modules']):
+                    for pg in cached_build_pages(fp, mod_idx):
                         qid = str(pg.get('question_id', ''))
                         if pg.get('explanation'):
                             md_expl[qid] = md_html(pg['explanation'])
@@ -232,9 +295,11 @@ def assignments():
     tests = cached_scan()
     completed_keys = db.get_completed_test_keys(u['id'])
     pending = [a for a in my_assignments if (a['test_id'], a.get('section')) not in completed_keys]
+    # now_date/now_iso drive the red/amber "overdue" and "not yet available" badges in the template.
+    # Use local time to match <input type="datetime-local"> (stored unchanged) — see take_test().
     return render_template('assignments.html', assignments=pending, tests=tests, user=u,
-        now_date=dt.utcnow().strftime('%Y-%m-%d'),
-        now_iso=dt.utcnow().strftime('%Y-%m-%dT%H:%M'))
+        now_date=dt.now().strftime('%Y-%m-%d'),
+        now_iso=dt.now().strftime('%Y-%m-%dT%H:%M'))
 
 @app.route('/api/module/<filename>')
 def api_module(filename):
@@ -244,7 +309,7 @@ def api_module(filename):
     parsed = cached_parse(fp)
     if mi >= len(parsed['modules']): abort(404)
     mod = parsed['modules'][mi]
-    pages = pages_to_html(build_question_list(mod))
+    pages = pages_to_html(cached_build_pages(fp, mi))
     is_practice = request.args.get('practice') == 'true'
     # Practice mode requires login or guest session (prevents unauthenticated answer extraction)
     if is_practice:
@@ -293,7 +358,7 @@ def api_grade():
     parsed = cached_parse(fp)
     if mi >= len(parsed['modules']): abort(404)
     mod = parsed['modules'][mi]
-    pages = build_question_list(mod)
+    pages = cached_build_pages(fp, mi)
     correct = 0; total = 0; details = []
     for pg in pages:
         qid = str(pg.get('question_id',''))
@@ -360,8 +425,8 @@ def api_save_results():
             fp = safe_path(TESTS_DIR, fn)
             if fp and os.path.exists(fp):
                 parsed = cached_parse(fp)
-                for mod in parsed['modules']:
-                    for pg in build_question_list(mod):
+                for mod_idx, mod in enumerate(parsed['modules']):
+                    for pg in cached_build_pages(fp, mod_idx):
                         qid = str(pg.get('question_id', ''))
                         qt = pg.get('question_type', '')
                         if qt == 'mc':
@@ -444,11 +509,13 @@ def api_session_start():
     practice = data.get('practice', False)
     playlist = data.get('playlist', [])
     # Schedule enforcement: block if student has a scheduled assignment outside its window
+    # schedule_start/end come from <input type="datetime-local"> which is LOCAL time —
+    # compare against local now(), not utcnow(), so the window behaves as the teacher intended.
     if u['role'] == 'student' and not practice:
         my_assignments = db.get_assignments(student_id=u['id'])
         for a in my_assignments:
             if a['test_id'] == test_id and (not section or a.get('section') == section):
-                now = dt.utcnow().strftime('%Y-%m-%dT%H:%M')
+                now = dt.now().strftime('%Y-%m-%dT%H:%M')
                 if a.get('schedule_start') and a['schedule_start'] > now:
                     return jsonify({'error': 'not_yet_available', 'message': 'This test is not available yet.'}), 403
                 if a.get('schedule_end') and a['schedule_end'] < now:
@@ -620,11 +687,13 @@ def take_test(test_id):
     tests = cached_scan()
     if test_id not in tests: abort(404)
     # Schedule enforcement: if student has a scheduled assignment, check time window
+    # schedule_start/end come from <input type="datetime-local"> which is LOCAL time —
+    # compare against local now(), not utcnow(), so the window behaves as the teacher intended.
     if u and u['role'] == 'student':
         my_assignments = db.get_assignments(student_id=u['id'])
         for a in my_assignments:
             if a['test_id'] == test_id:
-                now = dt.utcnow().strftime('%Y-%m-%dT%H:%M')
+                now = dt.now().strftime('%Y-%m-%dT%H:%M')
                 if a.get('schedule_start') and a['schedule_start'] > now:
                     flash('This test is not available yet. It opens at ' + fmtdate_full(a['schedule_start']))
                     return redirect('/assignments')
@@ -696,14 +765,17 @@ def admin_delete_user(uid):
     if uid == session.get('user_id'):
         flash('Cannot delete yourself')
     else:
-        # Clean up recording files for all the user's results
-        results = db.get_results(user_id=uid, limit=100000)
-        for r in results:
-            rec_dir = os.path.join(RECORDINGS_DIR, str(r['id']))
+        # Clean up recording files for all the user's results.
+        # Use a lightweight ID-only query; the previous implementation loaded up to
+        # 100,000 fully-hydrated result rows just to read r['id'].
+        conn = db.get_db()
+        result_ids = [row['id'] for row in conn.execute(
+            "SELECT id FROM test_results WHERE user_id=?", (uid,)).fetchall()]
+        for rid in result_ids:
+            rec_dir = os.path.join(RECORDINGS_DIR, str(rid))
             if os.path.isdir(rec_dir):
                 shutil.rmtree(rec_dir, ignore_errors=True)
         # Clean up any session recordings
-        conn = db.get_db()
         sess_rows = conn.execute("SELECT id FROM test_sessions WHERE user_id=?", (uid,)).fetchall()
         for sr in sess_rows:
             sess_dir = os.path.join(RECORDINGS_DIR, 'session_' + str(sr['id']))
@@ -783,6 +855,7 @@ def admin_announcement():
     content = request.form.get('content', '').strip()
     if content:
         db.create_announcement(cur_user()['id'], content)
+        _invalidate_announcement_cache()
         flash('Announcement posted')
     return redirect('/admin/users')
 
@@ -791,6 +864,7 @@ def admin_announcement():
 @require_role('admin')
 def admin_dismiss_announcement():
     db.dismiss_announcement()
+    _invalidate_announcement_cache()
     flash('Announcement dismissed')
     return redirect('/admin/users')
 
@@ -1002,9 +1076,13 @@ def api_review_data(result_id):
             detail_map[str(d.get('qid', ''))] = d
     # Load ONLY modules that were actually taken (not the entire test)
     modules = []
+    audio_dir = ''
     for mod_info in test_info['modules']:
         fp = safe_path(TESTS_DIR, mod_info['filename'])
         if not fp or not os.path.exists(fp): continue
+        # Audio files live next to the test file in a directory named after its stem
+        if not audio_dir:
+            audio_dir = os.path.splitext(mod_info['filename'])[0]
         parsed = cached_parse(fp)
         mi = mod_info['module_index']
         if mi >= len(parsed['modules']): continue
@@ -1012,7 +1090,7 @@ def api_review_data(result_id):
         # Skip modules that weren't in the graded results
         if (mod['section'], mod['module']) not in taken_modules:
             continue
-        pages = pages_to_html(build_question_list(mod))
+        pages = pages_to_html(cached_build_pages(fp, mi))
         for p in pages:
             qid = str(p.get('question_id', ''))
             p['graded'] = detail_map.get(qid, {})
@@ -1045,6 +1123,7 @@ def api_review_data(result_id):
     return jsonify({'modules': modules, 'notes': notes, 'comments': comments,
         'explanations': explanations, 'recordings': recs, 'result_id': result_id,
         'section_summaries': section_summaries,
+        'audio_dir': audio_dir,
         'student_name': r.get('display_name') or r.get('username') or '',
         'is_authorized_teacher': is_auth_teacher,
         'authorized_teacher_ids': list(authorized_teacher_ids),
@@ -1104,8 +1183,7 @@ def api_toefl_scores(result_id):
     """Calculate TOEFL 2026 1-6 band scores per section."""
     u = cur_user()
     r = get_result_or_403(result_id)
-    sections = parse_json(r['sections_json'])
-    # Teachers/admins see draft rubric scores; students only see submitted ones
+    # Teachers/admins see draft rubric scores; students/parents only see submitted ones.
     is_teacher = u['role'] in ('admin', 'teacher')
     comments = db.get_teacher_comments(result_id, include_drafts=is_teacher)
     rubric_map = {}
@@ -1114,20 +1192,13 @@ def api_toefl_scores(result_id):
             qid = key[8:]
             try: rubric_map[qid] = int(val['comment'])
             except Exception: pass
-    section_bands = {}
-    for sec in sections:
-        s = sec.get('section', '')
-        band = section_band(s, sec.get('details', []), rubric_map)
-        if band is not None:
-            section_bands.setdefault(s, []).append(band)
-    result_bands = {}
-    for s, bands in section_bands.items():
-        result_bands[s] = round(sum(bands) / len(bands) * 2) / 2
-    if result_bands:
-        overall = round(sum(result_bands.values()) / len(result_bands) * 2) / 2
-    else:
-        overall = None
-    return jsonify({'section_bands': result_bands, 'overall': overall, 'rubric_scores': rubric_map})
+    # Delegate to the shared band computation used elsewhere (history, analytics).
+    bands = compute_result_bands(r['sections_json'], rubric_map)
+    return jsonify({
+        'section_bands': bands['section_bands'],
+        'overall': bands['overall'],
+        'rubric_scores': rubric_map,
+    })
 
 # ===== History (merged with Analytics for students) =====
 
@@ -1170,7 +1241,7 @@ def teacher_student_view(uid):
     return render_template('history.html', results=results, user=u,
         page=page, total_pages=total_pages, assigned_test_ids=assigned_test_ids,
         view_user=student, show_analytics=True, pending_assignments=pending, tests=tests,
-        now_date=dt.utcnow().strftime('%Y-%m-%d'))
+        now_date=dt.now().strftime('%Y-%m-%d'))
 
 # ===== Notes API =====
 
@@ -1219,25 +1290,17 @@ def api_analytics(uid):
     section_totals = {}
     section_correct = {}
     for r in results:
-        sections = parse_json(r['sections_json'])
         rubric_for_result = rubric_map_all.get(r['id'], {})
+        # Delegate to the shared helper instead of re-implementing the walk inline.
+        bands = compute_result_bands(r['sections_json'], rubric_for_result)
+        sections = parse_json(r['sections_json'])
         if r['total_questions'] > 0:
             pct = round(r['total_correct'] / r['total_questions'] * 100)
-            # Calculate per-section bands for this test result
-            section_bands_for_test = {}
-            for sec in sections:
-                s = sec.get('section', '')
-                band = section_band(s, sec.get('details', []), rubric_for_result)
-                if band is not None:
-                    section_bands_for_test[s] = band
-            # Overall band = average of available section bands
-            avg_band = None
-            if section_bands_for_test:
-                avg_band = round(sum(section_bands_for_test.values()) / len(section_bands_for_test) * 2) / 2
             score_history.append({
-                'date': r['date'][:10], 'pct': pct, 'band': avg_band,
+                'date': r['date'][:10], 'pct': pct,
+                'band': bands['overall'],
                 'name': r['test_name'] or r['test_id'],
-                'section_bands': section_bands_for_test,
+                'section_bands': bands['section_bands'],
             })
         for sec in sections:
             s = sec.get('section', 'unknown')
@@ -1418,6 +1481,18 @@ def api_review_count():
     return jsonify({'count': db.get_review_count(cur_user()['id'])})
 
 
+@app.route('/api/badges')
+@require_login
+def api_badges():
+    """Merged badge counts for the sidebar. Single request replaces the two independent
+    polls that ran every 60 seconds on every page (review-count + notifications)."""
+    u = cur_user()
+    return jsonify({
+        'review_count': db.get_review_count(u['id']),
+        'notification_count': db.get_unread_count(u['id']),
+    })
+
+
 @app.route('/api/review-answer/<int:error_id>', methods=['POST'])
 @require_login
 def api_review_answer(error_id):
@@ -1455,7 +1530,8 @@ def api_live_sessions():
                 try:
                     parsed = cached_parse(fp)
                     if mi < len(parsed['modules']):
-                        total_pages = len(build_question_list(parsed['modules'][mi]))
+                        pages = cached_build_pages(fp, mi)
+                        total_pages = len(pages) if pages else 0
                 except Exception:
                     pass
         test_name = tests.get(s['test_id'], {}).get('test_name', s['test_id'])
@@ -1537,9 +1613,68 @@ def api_mark_read():
 
 # ===== Native Client API =====
 
+@app.route('/api/auth/token', methods=['POST'])
+def api_auth_token():
+    """Exchange username + password for a long-lived Bearer token.
+
+    Request JSON:  {"username": str, "password": str, "name"?: str, "expires_in_days"?: int}
+    Response JSON: {"ok": true, "token": "tfl_...", "token_id": int, "user": {...}, "expires_at": "..."|null}
+
+    The token is shown exactly once — the server only stores its SHA-256 hash.
+    Clients should store it in a secure keystore (Keychain on macOS)."""
+    data = request.get_json() or {}
+    ip = request.remote_addr or '0.0.0.0'
+    if check_rate_limit(ip):
+        return jsonify({'ok': False, 'error': 'rate_limited'}), 429
+    record_attempt(ip)
+    u = db.authenticate(data.get('username', '').strip(), data.get('password', ''))
+    if not u:
+        return jsonify({'ok': False, 'error': 'invalid_credentials'}), 401
+    # Generate plaintext token: 256 bits of entropy, url-safe, prefixed for grep-ability
+    plaintext = 'tfl_' + secrets.token_urlsafe(32)
+    name = (data.get('name') or 'API client').strip()[:64]
+    expires_at = None
+    days = data.get('expires_in_days')
+    if isinstance(days, int) and days > 0:
+        from datetime import timedelta, timezone
+        # Token expiry is stored in UTC (DB timestamps use SQLite datetime('now') which is UTC).
+        # datetime.utcnow() is deprecated in 3.12+; use timezone-aware UTC and strip tzinfo for
+        # a naive UTC string that sorts lexicographically against DB timestamps.
+        expires_at = (dt.now(timezone.utc).replace(tzinfo=None) + timedelta(days=days)).isoformat(sep=' ', timespec='seconds')
+    token_id = db.create_api_token(u['id'], plaintext, name=name, expires_at=expires_at)
+    return jsonify({
+        'ok': True,
+        'token': plaintext,
+        'token_id': token_id,
+        'expires_at': expires_at,
+        'user': {
+            'id': u['id'], 'username': u['username'],
+            'display_name': u['display_name'], 'role': u['role'],
+        },
+    })
+
+
+@app.route('/api/auth/tokens', methods=['GET'])
+@require_login
+def api_list_tokens():
+    """List the current user's issued tokens (hashes never returned)."""
+    u = cur_user()
+    return jsonify({'ok': True, 'tokens': db.list_api_tokens(u['id'])})
+
+
+@app.route('/api/auth/tokens/<int:token_id>', methods=['DELETE'])
+@require_login
+def api_revoke_token(token_id):
+    """Revoke one of the current user's tokens."""
+    u = cur_user()
+    ok = db.revoke_api_token(u['id'], token_id)
+    return jsonify({'ok': ok})
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
-    """JSON login for native clients. Returns user info on success."""
+    """JSON login for native clients. Returns user info on success.
+    (Legacy session-cookie flow — new clients should prefer /api/auth/token.)"""
     data = request.get_json()
     if not data: abort(400)
     ip = request.remote_addr or '0.0.0.0'
@@ -1559,7 +1694,7 @@ def api_login():
 
 @app.route('/api/auth/me')
 def api_me():
-    """Get current authenticated user info."""
+    """Get current authenticated user info. Works with either session cookie or Bearer token."""
     u = cur_user()
     if not u:
         return jsonify({'ok': False, 'error': 'not_authenticated'}), 401

@@ -759,8 +759,25 @@ function mkAudioPlayer(src) {
     var audio = document.createElement('audio');
     audio.controls = true; audio.preload = 'auto'; audio.className = 'recording-player';
     audio.style.marginBottom = '16px';
-    audio.innerHTML = '<source src="/audio/' + esc(src) + '">';
+    // Audio files live at /audio/<test-stem>/<src>.ogg. The test stem is the
+    // current module's filename without the .md extension.
+    var dir = (_allPages[_pageIdx] && _data.modules[_allPages[_pageIdx].moduleIdx])
+        ? _audioDirFor(_allPages[_pageIdx].moduleIdx) : '';
+    var url = '/audio/' + encodeURIComponent(dir) + '/' + encodeURIComponent(src) + '.ogg';
+    audio.innerHTML = '<source src="' + esc(url) + '">';
     return audio;
+}
+
+// Cache the audio directory name per module (derived from the test filename).
+function _audioDirFor(moduleIdx) {
+    // The modules we get from /api/review-data don't carry the original filename,
+    // so we fall back to the test_id in the page URL. All modules in a test share
+    // the same audio directory (named after the test-file stem).
+    if (window._audioDirCache) return window._audioDirCache;
+    // Prefer the test filename from the first module catalog entry, which the server
+    // passes down via the review-data response if available.
+    if (_data && _data.audio_dir) { window._audioDirCache = _data.audio_dir; return _data.audio_dir; }
+    return '';
 }
 
 document.addEventListener('DOMContentLoaded', loadReview);

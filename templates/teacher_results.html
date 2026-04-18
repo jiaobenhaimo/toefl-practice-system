@@ -22,15 +22,16 @@
                     {% endfor %}
                 </select>
                 {% if students %}
-                <form method="POST" action="/teacher/export" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                <form method="POST" action="/teacher/export" style="margin-left:auto;display:flex;gap:8px;align-items:center" id="export-form">
                     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                    <select name="student_ids" class="login-input" style="max-width:220px">
-                        <option value="" data-i18n="exportStudent">Select student to export...</option>
+                    <select name="student_ids" multiple required class="login-input"
+                            style="max-width:260px;min-height:44px;height:44px;padding:0 10px"
+                            size="1" title="Hold ⌘ (macOS) or Ctrl (Windows) to select multiple"
+                            aria-label="Students to export">
                         {% for s in students %}
                         <option value="{{ s.id }}">{{ s.display_name }}</option>
                         {% endfor %}
                     </select>
-                    <input type="hidden" name="format" value="csv">
                     <button type="submit" class="btn btn--secondary" data-i18n="exportCSV">Export CSV</button>
                 </form>
                 {% endif %}

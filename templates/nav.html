@@ -120,6 +120,7 @@
         sidebar.classList.toggle('sidebar--open', open);
         overlay.classList.toggle('sidebar-overlay--active', open);
         hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        hamburger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
         document.body.style.overflow = open ? 'hidden' : '';
     }
     if (hamburger) hamburger.addEventListener('click', function() {
@@ -143,32 +144,32 @@
                 a.setAttribute('aria-current', 'page');
             }
         });
-        // Unified badge polling: one endpoint would be nicer but we keep existing APIs.
-        // Use visibilitychange to pause polling when tab is hidden (saves bandwidth + battery).
+        // Unified badge polling: single /api/badges request replaces the two independent
+        // polls (/api/review-count + /api/notifications) that each ran every 60s on every page.
+        // visibilitychange pauses polling when the tab is hidden to save bandwidth and battery.
         var badge = document.getElementById('review-badge');
         var notifBadge = document.getElementById('notif-badge');
-        var reviewTimer = null, notifTimer = null;
-        function updateReview() {
-            if (!badge) return;
-            fetch('/api/review-count').then(function(r) { return r.json(); }).then(function(data) {
-                if (data.count > 0) { badge.textContent = data.count; badge.style.display = ''; }
-                else { badge.style.display = 'none'; }
-            }).catch(function() {});
+        var pollTimer = null;
+        function setBadge(el, count) {
+            if (!el) return;
+            if (count > 0) { el.textContent = count; el.style.display = ''; }
+            else { el.style.display = 'none'; }
         }
-        function updateNotif() {
-            if (!notifBadge) return;
-            fetch('/api/notifications').then(function(r) { return r.json(); }).then(function(data) {
-                if (data.count > 0) { notifBadge.textContent = data.count; notifBadge.style.display = ''; }
-                else { notifBadge.style.display = 'none'; }
+        function updateBadges() {
+            if (!badge && !notifBadge) return;
+            fetch('/api/badges').then(function(r) { return r.json(); }).then(function(data) {
+                setBadge(badge, data.review_count);
+                setBadge(notifBadge, data.notification_count);
             }).catch(function() {});
         }
         function startPolling() {
-            if (badge && !reviewTimer) { updateReview(); reviewTimer = setInterval(updateReview, 60000); }
-            if (notifBadge && !notifTimer) { updateNotif(); notifTimer = setInterval(updateNotif, 60000); }
+            if ((badge || notifBadge) && !pollTimer) {
+                updateBadges();
+                pollTimer = setInterval(updateBadges, 60000);
+            }
         }
         function stopPolling() {
-            if (reviewTimer) { clearInterval(reviewTimer); reviewTimer = null; }
-            if (notifTimer) { clearInterval(notifTimer); notifTimer = null; }
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
         document.addEventListener('visibilitychange', function() {
             if (document.visibilityState === 'visible') startPolling();

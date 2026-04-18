@@ -6,7 +6,7 @@ import os, json, copy, time, markdown, yaml
 from pathlib import Path
 from functools import wraps
 from flask import session, request, redirect, abort, g
-from parser import scan_tests_directory, parse_test_file
+from parser import scan_tests_directory, parse_test_file, build_question_list
 import database as db
 
 # ===== Config =====
@@ -37,6 +37,28 @@ def cached_parse(filepath):
     r = parse_test_file(filepath)
     _parse_cache[filepath] = (mtime, r)
     return r
+
+
+# Cache the flat page list derived from a module. build_question_list walks the module
+# structure and expands cloze blanks etc. — the result is pure of the parsed module, so
+# caching by (filepath, mtime, module_index) is safe and avoids redoing the work on
+# every /api/module, /api/save-results, and /api/review-data call.
+_pages_cache = {}
+
+
+def cached_build_pages(filepath, module_index):
+    """Return cached build_question_list for a module. Keyed on file mtime + module index."""
+    mtime = os.path.getmtime(filepath)
+    key = (filepath, module_index)
+    c = _pages_cache.get(key)
+    if c and c[0] == mtime:
+        return c[1]
+    parsed = cached_parse(filepath)
+    if module_index >= len(parsed['modules']):
+        return None
+    pages = build_question_list(parsed['modules'][module_index])
+    _pages_cache[key] = (mtime, pages)
+    return pages
 
 
 def cached_scan():
@@ -91,19 +113,56 @@ def safe_path(base, user_path):
 
 # ===== Auth helpers =====
 
+def _token_from_request():
+    """Extract bearer token from Authorization header, or from X-API-Token.
+    Returns the plaintext token string or None."""
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        return auth[7:].strip() or None
+    # Alternative header for environments where Authorization is stripped (some reverse proxies)
+    t = request.headers.get('X-API-Token', '').strip()
+    return t or None
+
+
 def cur_user():
-    """Get the current logged-in user, cached per-request in flask.g."""
-    if not hasattr(g, '_cur_user'):
+    """Get the current authenticated user, cached per-request in flask.g.
+    Tries in order:
+      1. Bearer token in Authorization header (for native clients)
+      2. Flask session cookie (for web browser)
+    Returns None if neither is valid."""
+    if hasattr(g, '_cur_user'):
+        return g._cur_user
+    user = None
+    tok = _token_from_request()
+    if tok:
+        user = db.lookup_token(tok)
+        if user:
+            g._auth_method = 'token'
+    if user is None:
         uid = session.get('user_id')
-        g._cur_user = db.get_user(uid) if uid else None
-    return g._cur_user
+        if uid:
+            user = db.get_user(uid)
+            if user:
+                g._auth_method = 'session'
+    g._cur_user = user
+    return user
+
+
+def auth_method():
+    """Return 'token', 'session', or None. Must be called after cur_user()."""
+    return getattr(g, '_auth_method', None)
 
 
 def require_login(f):
-    """Decorator: redirect to login if not authenticated."""
+    """Decorator: accept session cookie OR bearer token. For token/JSON clients, returns
+    JSON 401; for browsers, redirects to the login page."""
     @wraps(f)
     def dec(*a, **kw):
-        if not session.get('user_id'):
+        if cur_user() is None:
+            # Token-authenticated request that failed: return JSON 401, not redirect
+            if _token_from_request() or request.is_json or request.path.startswith('/api/'):
+                from flask import jsonify
+                return jsonify({'ok': False, 'error': 'not_authenticated'}), 401
             return redirect('/login?next=' + request.path)
         return f(*a, **kw)
     return dec

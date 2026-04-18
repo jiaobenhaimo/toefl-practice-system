@@ -1,0 +1,50 @@
+# /etc/systemd/system/toefl.service
+#
+# Install:
+#   sudo cp deploy/toefl.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now toefl
+#
+# Logs:
+#   journalctl -u toefl -f
+
+[Unit]
+Description=超能录 TOEFL Practice Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# Adjust to the OS user you created (e.g. `sudo useradd --system --shell /usr/sbin/nologin toefl`)
+User=toefl
+Group=toefl
+WorkingDirectory=/opt/toefl/app
+
+# Environment — EDIT THESE before deploying.
+# SECRET_KEY must be a long random string: `python3 -c "import secrets; print(secrets.token_hex(32))"`
+Environment="SECRET_KEY=CHANGE_ME_TO_A_LONG_RANDOM_STRING"
+Environment="TOEFL_BEHIND_HTTPS=1"
+Environment="TOEFL_DB_PATH=/opt/toefl/data/toefl.db"
+Environment="TOEFL_TESTS_DIR=/opt/toefl/tests"
+Environment="GUNICORN_BIND=127.0.0.1:8080"
+Environment="GUNICORN_WORKERS=3"
+# Optionally allow additional origins for CORS (comma-separated):
+# Environment="CORS_ORIGINS=https://toefl.example.com"
+
+# Use a venv at /opt/toefl/venv
+ExecStart=/opt/toefl/venv/bin/gunicorn -c /opt/toefl/app/gunicorn.conf.py app:app
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/toefl/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
