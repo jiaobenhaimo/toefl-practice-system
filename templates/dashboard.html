@@ -49,8 +49,8 @@
 
 <script>
 var trendChart = null, sectionChart = null;
-var _uid = {{ user.id }};
-var _isStudent = {{ 'true' if user.role == 'student' else 'false' }};
+// The /dashboard route redirects student users to /history, so this template
+// only renders for admin/teacher roles. The student picker is always shown.
 
 // Configure Chart.js colors from CSS variables (dark mode support)
 function getChartColors() {
@@ -69,7 +69,7 @@ function chartScaleOpts() {
 }
 
 function loadAnalytics() {
-    var uid = _isStudent ? _uid : document.getElementById('student-select').value;
+    var uid = document.getElementById('student-select').value;
     var histLink = document.getElementById('student-history-link');
     if (!uid) {
         document.getElementById('dashboard-content').style.display = 'none';
@@ -183,10 +183,6 @@ function renderWeakest(sections) {
     });
     el.innerHTML = html;
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-    if (_isStudent) loadAnalytics();
-});
 </script>
 
 <style>

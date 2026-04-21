@@ -1,0 +1,67 @@
+{#
+  _results_table.html — shared partial for history / teacher-results views.
+
+  Caller context:
+    results             — list of result dicts (enriched with band info)
+    show_student        — bool; include the "Student" column (teacher_results only)
+    show_type_column    — bool; include the Practice/Assigned badge column
+    assigned_test_ids   — set; tests the viewer has been assigned (for Assigned badge)
+    filter_attr_name    — optional str; if present, emit data-<name> on rows for client filter
+#}
+<table class="user-table"{% if table_id %} id="{{ table_id }}"{% endif %}>
+    <thead>
+        <tr>
+            {% if show_student %}<th data-i18n="colStudent">Student</th>{% endif %}
+            <th data-i18n="colTest">Test</th>
+            {% if show_type_column %}<th data-i18n="colType">Type</th>{% endif %}
+            <th data-i18n="colScore">Score</th>
+            <th data-i18n="colDate">Date</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if not results %}
+        <tr><td colspan="{{ (6 if show_student else 5) - (0 if show_type_column else 1) }}" style="color:var(--text-muted);padding:16px 0"><span data-i18n="noResultsYet">No results yet.</span></td></tr>
+        {% else %}
+        {% for r in results %}
+        <tr class="result-row--clickable"
+            onclick="location.href='/review/{{ r.id }}'" tabindex="0" role="link"
+            onkeydown="if(event.key==='Enter')location.href='/review/{{ r.id }}'"
+            {% if filter_attr_name %}data-{{ filter_attr_name }}="{{ r.display_name or r.username or 'Guest' }}"{% endif %}>
+            {% if show_student %}
+            <td>
+                <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
+                {% if r.practice %}<span class="practice-badge">Practice</span>{% endif %}
+            </td>
+            <td class="user-table__main">{{ r.test_name or r.test_id }}</td>
+            {% else %}
+            <td><strong>{{ r.test_name or r.test_id }}</strong></td>
+            {% endif %}
+            {% if show_type_column %}
+            <td>
+                {% if r.practice %}
+                <span class="practice-badge" data-i18n="colPractice">Practice</span>
+                {% elif assigned_test_ids and r.test_id in assigned_test_ids %}
+                <span class="assigned-badge" data-i18n="colAssigned">Assigned</span>
+                {% endif %}
+            </td>
+            {% endif %}
+            <td>
+                {% if r.band_overall is not none %}
+                <strong style="color:var(--accent)">{{ '%.1f'|format(r.band_overall) }}</strong>
+                {% if r.needs_rubric %}<span style="color:var(--amber);font-size:var(--fs-caption1);margin-left:4px" title="Awaiting teacher rubric scores">⏳</span>{% endif %}
+                {% elif r.needs_rubric %}
+                <span style="color:var(--text-muted);font-size:var(--fs-caption1)" data-i18n="awaitingScore">Awaiting score</span>
+                {% endif %}
+            </td>
+            <td style="color:var(--text-dim)"><span data-i18n-date="{{ r.date }}">{{ r.date|fmtdate }}</span></td>
+            <td class="user-table__actions" onclick="event.stopPropagation()">
+                <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF"{% if confirm_pdf %} onclick="return confirmPdfExport(event, this.href)"{% endif %}>
+                    <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+    </tbody>
+</table>

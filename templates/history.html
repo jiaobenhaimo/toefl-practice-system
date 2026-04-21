@@ -170,45 +170,9 @@
         </div>
         {% else %}
         <div class="card" style="margin-top:16px">
-            <table class="user-table">
-                <thead>
-                    <tr>
-                        <th data-i18n="colTest">Test</th>
-                        <th data-i18n="colType">Type</th>
-                        <th data-i18n="colScore">Score</th>
-                        <th data-i18n="colDate">Date</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for r in results %}
-                    <tr class="result-row--clickable" onclick="location.href='/review/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/review/{{ r.id }}'">
-                        <td><strong>{{ r.test_name or r.test_id }}</strong></td>
-                        <td>
-                            {% if r.practice %}
-                            <span class="practice-badge" data-i18n="colPractice">Practice</span>
-                            {% elif r.test_id in assigned_test_ids %}
-                            <span class="assigned-badge" data-i18n="colAssigned">Assigned</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if r.band_overall is not none %}
-                            <strong style="color:var(--accent)">{{ '%.1f'|format(r.band_overall) }}</strong>
-                            {% if r.needs_rubric %}<span style="color:var(--amber);font-size:0.78rem;margin-left:4px" title="Awaiting teacher rubric scores">⏳</span>{% endif %}
-                            {% elif r.needs_rubric %}
-                            <span style="color:var(--text-muted);font-size:0.82rem" data-i18n="awaitingScore">Awaiting score</span>
-                            {% endif %}
-                        </td>
-                        <td style="color:var(--text-dim)"><span data-i18n-date="{{ r.date }}">{{ r.date|fmtdate }}</span></td>
-                        <td class="user-table__actions" onclick="event.stopPropagation()">
-                            <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF" onclick="return confirmPdfExport(event, this.href)">
-                                <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
-                            </a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            {% with show_student=False, show_type_column=True, confirm_pdf=True %}
+            {% include "_results_table.html" %}
+            {% endwith %}
         </div>
         {% if total_pages > 1 %}
         <div class="pagination">
@@ -221,40 +185,13 @@
     </main>
 </div>
 
-<!-- PDF Export Confirmation Modal (item 7) -->
-<div class="test-modal-overlay" id="pdf-confirm-overlay" onclick="if(event.target===this)closePdfModal()">
-    <div class="test-modal" role="dialog">
-        <button class="test-modal__close" onclick="closePdfModal()" aria-label="Close"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-        <h3 class="test-modal__title">Export PDF</h3>
-        <p style="margin:16px 0;font-size:0.95rem;color:var(--text-muted)">Download a PDF report of this test result?</p>
-        <div style="display:flex;gap:10px;justify-content:flex-end">
-            <button class="btn btn--secondary" onclick="closePdfModal()">Cancel</button>
-            <button class="btn btn--primary" id="pdf-confirm-btn" autofocus>Download</button>
-        </div>
-    </div>
-</div>
 <script>
-var _pdfUrl = '';
+// PDF export confirmation — delegates to the shared HIG confirm dialog in base.html.
 function confirmPdfExport(e, url) {
     e.preventDefault();
-    _pdfUrl = url;
-    document.getElementById('pdf-confirm-overlay').classList.add('test-modal-overlay--active');
-    document.getElementById('pdf-confirm-btn').focus();
+    showConfirm('Export PDF', 'Download a PDF report of this test result?', 'Download',
+        function() { window.location.href = url; });
     return false;
 }
-function closePdfModal() {
-    document.getElementById('pdf-confirm-overlay').classList.remove('test-modal-overlay--active');
-}
-document.getElementById('pdf-confirm-btn').onclick = function() {
-    closePdfModal();
-    window.location.href = _pdfUrl;
-};
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closePdfModal();
-    if (e.key === 'Enter' && document.getElementById('pdf-confirm-overlay').classList.contains('test-modal-overlay--active')) {
-        closePdfModal();
-        if (_pdfUrl) window.location.href = _pdfUrl;
-    }
-});
 </script>
 {% endblock %}

@@ -136,21 +136,12 @@ def cur_user():
     tok = _token_from_request()
     if tok:
         user = db.lookup_token(tok)
-        if user:
-            g._auth_method = 'token'
     if user is None:
         uid = session.get('user_id')
         if uid:
             user = db.get_user(uid)
-            if user:
-                g._auth_method = 'session'
     g._cur_user = user
     return user
-
-
-def auth_method():
-    """Return 'token', 'session', or None. Must be called after cur_user()."""
-    return getattr(g, '_auth_method', None)
 
 
 def require_login(f):
@@ -210,6 +201,37 @@ def get_result_or_403(result_id):
         if not student or r['user_id'] != student['id']:
             abort(403)
     return r
+
+
+# ===== Schedule enforcement =====
+
+def check_schedule_window(user, test_id, section=None):
+    """Check whether a student is allowed to start a scheduled test right now.
+
+    Returns (allowed: bool, error_code: str | None, message: str | None).
+    - allowed=True for non-students, guests, and students with no scheduled window.
+    - error_code is 'not_yet_available' or 'schedule_expired' when blocked.
+
+    Schedule timestamps come from <input type="datetime-local"> which is LOCAL time,
+    so we compare against local now(), not UTC.
+    """
+    if not user or user.get('role') != 'student':
+        return True, None, None
+    from datetime import datetime as _dt
+    now_str = _dt.now().strftime('%Y-%m-%dT%H:%M')
+    assignments = db.get_assignments(student_id=user['id'])
+    for a in assignments:
+        if a['test_id'] != test_id:
+            continue
+        if section and a.get('section') and a.get('section') != section:
+            continue
+        start = a.get('schedule_start')
+        end = a.get('schedule_end')
+        if start and start > now_str:
+            return False, 'not_yet_available', 'This test is not available yet. It opens at ' + fmtdate_full(start)
+        if end and end < now_str:
+            return False, 'schedule_expired', 'The schedule for this test has ended.'
+    return True, None, None
 
 
 # ===== Date formatting =====
@@ -314,12 +336,13 @@ def section_band(section, details, rubric_map):
     elif section == 'writing':
         raw, max_raw = 0, 0
         for d in details:
-            dt = d.get('type', '')
-            if dt in ('build_sentence', 'mc', 'cloze') and d.get('correct') is not None:
+            # Don't alias this as `dt` — that collides with `datetime as dt` used elsewhere.
+            qtype = d.get('type', '')
+            if qtype in ('build_sentence', 'mc', 'cloze') and d.get('correct') is not None:
                 max_raw += 1
                 if d.get('correct'):
                     raw += 1
-            elif dt in ('email', 'discussion'):
+            elif qtype in ('email', 'discussion'):
                 qid = str(d.get('qid', ''))
                 max_raw += 5
                 if qid in rubric_map:
@@ -330,8 +353,8 @@ def section_band(section, details, rubric_map):
     elif section == 'speaking':
         raw, max_raw = 0, 0
         for d in details:
-            dt, qid = d.get('type', ''), str(d.get('qid', ''))
-            if dt in ('listen_repeat', 'interview'):
+            qtype, qid = d.get('type', ''), str(d.get('qid', ''))
+            if qtype in ('listen_repeat', 'interview'):
                 max_raw += 5
                 if qid in rubric_map:
                     raw += rubric_map[qid]
@@ -361,8 +384,8 @@ def compute_result_bands(sections_json_str, rubric_map=None):
         # Check if this section needs rubric scores that haven't been provided
         if s in ('speaking', 'writing'):
             for d in sec.get('details', []):
-                dt = d.get('type', '')
-                if dt in ('email', 'discussion', 'listen_repeat', 'interview'):
+                qtype = d.get('type', '')
+                if qtype in ('email', 'discussion', 'listen_repeat', 'interview'):
                     qid = str(d.get('qid', ''))
                     if qid not in rubric_map:
                         needs_rubric = True

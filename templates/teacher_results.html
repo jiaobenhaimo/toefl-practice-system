@@ -39,46 +39,9 @@
         </div>
 
         <div class="card">
-            <table class="user-table" id="submissions-table">
-                <thead>
-                    <tr>
-                        <th data-i18n="colStudent">Student</th>
-                        <th data-i18n="colTest">Test</th>
-                        <th data-i18n="colScore">Score</th>
-                        <th data-i18n="colDate">Date</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if results %}
-                    {% for r in results %}
-                    <tr class="result-row--clickable" onclick="location.href='/review/{{ r.id }}'" tabindex="0" role="link" onkeydown="if(event.key==='Enter')location.href='/review/{{ r.id }}'" data-student="{{ r.display_name or r.username or 'Guest' }}">
-                        <td>
-                            <strong>{{ r.display_name or r.username or 'Guest' }}</strong>
-                            {% if r.practice %}<span class="practice-badge">Practice</span>{% endif %}
-                        </td>
-                        <td class="user-table__main">{{ r.test_name or r.test_id }}</td>
-                        <td>
-                            {% if r.band_overall is not none %}
-                            <strong style="color:var(--accent)">{{ '%.1f'|format(r.band_overall) }}</strong>
-                            {% if r.needs_rubric %}<span style="color:var(--amber);font-size:0.78rem;margin-left:4px" title="Awaiting rubric scores">⏳</span>{% endif %}
-                            {% elif r.needs_rubric %}
-                            <span style="color:var(--text-muted);font-size:0.82rem" data-i18n="awaitingScore">Awaiting score</span>
-                            {% endif %}
-                        </td>
-                        <td style="color:var(--text-dim)"><span data-i18n-date="{{ r.date }}">{{ r.date|fmtdate }}</span></td>
-                        <td class="user-table__actions" onclick="event.stopPropagation()">
-                            <a href="/api/export-pdf/{{ r.id }}" class="btn btn--icon" title="Export PDF" aria-label="Export PDF">
-                                <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
-                            </a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    {% else %}
-                    <tr><td colspan="5" style="color:var(--text-muted);padding:16px 0"><span data-i18n="noResultsYet">No results yet.</span></td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
+            {% with show_student=True, show_type_column=False, confirm_pdf=False, filter_attr_name='student', table_id='submissions-table' %}
+            {% include "_results_table.html" %}
+            {% endwith %}
         </div>
         {% if total_pages > 1 %}
         <div class="pagination">

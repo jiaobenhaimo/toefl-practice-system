@@ -3,7 +3,7 @@ app.py — Flask application for TOEFL Practice Test System.
 Routes, middleware, and init. Shared helpers live in helpers.py.
 """
 import os, json, secrets, re, shutil, io, csv
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta, timezone
 from urllib.parse import urlparse
 from flask import (
     Flask, render_template, jsonify, request, session,
@@ -23,6 +23,7 @@ from helpers import (
     require_login, require_role,
     fmtdate, fmtdate_full,
     check_rate_limit, record_attempt,
+    check_schedule_window,
     lookup_band,
     _RL_BAND_TABLE, _WRITING_BAND_TABLE,
     compute_result_bands,
@@ -77,31 +78,18 @@ def _security_headers(response):
     return response
 
 
-@app.route('/api/<path:_any>', methods=['OPTIONS'])
-def _cors_preflight(_any):
-    """Handle CORS preflight for any /api/ route that doesn't already declare OPTIONS.
-    Flask auto-adds OPTIONS to every route, so this only fires for paths no other
-    handler matches — but the `after_request` CORS hook runs either way."""
-    return ('', 204)
-
 @app.context_processor
 def inject_config():
-    # Announcement used to hit the DB on every request. Cache for 30s per worker; the
-    # announcement is published/dismissed manually and near-real-time is fine. The
-    # existing g._announcement guard still prevented multiple queries within one request,
-    # but didn't help across requests.
-    now = _time.time()
-    if _announcement_cache['ts'] + 30 < now:
-        _announcement_cache['v'] = db.get_active_announcement()
-        _announcement_cache['ts'] = now
-    return {'site': SITE_CONFIG.get('site', {}), 'config': SITE_CONFIG, 'announcement': _announcement_cache['v']}
-
-# Per-process announcement cache. Reset when an announcement is posted or dismissed.
-_announcement_cache = {'v': None, 'ts': 0.0}
-import time as _time
-
-def _invalidate_announcement_cache():
-    _announcement_cache['ts'] = 0.0
+    # Announcement lookup: one lightweight DB query per request. The previous
+    # implementation cached the full announcement dict for 30 s per worker, which
+    # meant dismissing an announcement under gunicorn-with-N-workers left it
+    # visible on (N-1) workers for up to 30 s. A simple per-request fetch is
+    # cheap (indexed, 1 row) and always consistent.
+    return {
+        'site': SITE_CONFIG.get('site', {}),
+        'config': SITE_CONFIG,
+        'announcement': db.get_active_announcement(),
+    }
 
 app.template_filter('fmtdate')(fmtdate)
 app.template_filter('fmtdate_full')(fmtdate_full)
@@ -180,42 +168,50 @@ def _load_merged_explanations(test_id, test_info=None):
     DB explanations override markdown ones. Returns dict {qid: html}.
 
     Cached per-process; invalidated when any source .md file mtime changes
-    or when DB explanations are updated via save_explanation."""
+    or when DB explanations are updated via save_explanation.
+
+    Previously walked every module twice (once for mtimes, once for content) even
+    on cache hits. Now we gather mtimes first, short-circuit on cache hit, and
+    only parse modules on a cache miss.
+    """
     if not test_info:
         tests = cached_scan()
         test_info = tests.get(test_id)
-    # Build cache signature: all relevant file mtimes + DB version
-    mtimes = []
+    # Collect unique filenames once. Order preserved for determinism.
+    filenames = []
     if test_info:
         seen = set()
         for mi in test_info['modules']:
             fn = mi['filename']
-            if fn in seen: continue
+            if fn in seen:
+                continue
             seen.add(fn)
-            fp = safe_path(TESTS_DIR, fn)
-            if fp and os.path.exists(fp):
-                try: mtimes.append(os.path.getmtime(fp))
-                except OSError: pass
+            filenames.append(fn)
+    # Gather mtimes cheaply — no parse yet.
+    mtimes = []
+    for fn in filenames:
+        fp = safe_path(TESTS_DIR, fn)
+        if fp and os.path.exists(fp):
+            try:
+                mtimes.append(os.path.getmtime(fp))
+            except OSError:
+                pass
     sig = (tuple(sorted(mtimes)), _expl_db_version['v'])
     cached = _expl_cache.get(test_id)
     if cached and cached[0] == sig:
         return cached[1]
-    db_expl = db.get_explanations(test_id)
+    # Cache miss — now parse.
     md_expl = {}
-    if test_info:
-        seen = set()
-        for mi in test_info['modules']:
-            fn = mi['filename']
-            if fn in seen: continue
-            seen.add(fn)
-            fp = safe_path(TESTS_DIR, fn)
-            if fp and os.path.exists(fp):
-                parsed = cached_parse(fp)
-                for mod_idx, mod in enumerate(parsed['modules']):
-                    for pg in cached_build_pages(fp, mod_idx):
-                        qid = str(pg.get('question_id', ''))
-                        if pg.get('explanation'):
-                            md_expl[qid] = md_html(pg['explanation'])
+    for fn in filenames:
+        fp = safe_path(TESTS_DIR, fn)
+        if not (fp and os.path.exists(fp)):
+            continue
+        parsed = cached_parse(fp)
+        for mod_idx, _mod in enumerate(parsed['modules']):
+            for pg in cached_build_pages(fp, mod_idx) or []:
+                if pg.get('explanation'):
+                    md_expl[str(pg.get('question_id', ''))] = md_html(pg['explanation'])
+    db_expl = db.get_explanations(test_id)
     merged = {**md_expl}
     for qid, expl in db_expl.items():
         merged[qid] = md_html(str(html_escape(expl)))
@@ -255,10 +251,15 @@ def login():
             session['user_id'] = u['id']
             if remember: session.permanent = True
             nxt = request.args.get('next', '/')
-            # Prevent open redirect — only allow relative paths
-            if not nxt.startswith('/') or nxt.startswith('//'):
-                nxt = '/'
-            return redirect(nxt)
+            # Prevent open redirect — only allow same-site relative paths.
+            # Must start with a single '/' and have no netloc when parsed.
+            # Rejects: '//evil.com', '/\\evil.com', 'http://evil.com', 'javascript:...'.
+            safe_next = '/'
+            if nxt.startswith('/') and not nxt.startswith('//') and not nxt.startswith('/\\'):
+                parsed_nxt = urlparse(nxt)
+                if not parsed_nxt.netloc and not parsed_nxt.scheme:
+                    safe_next = nxt
+            return redirect(safe_next)
         error = 'Invalid username or password'
     return render_template('login.html', error=error)
 
@@ -412,8 +413,12 @@ def api_save_results():
     # Enrich sections with expected answers (client doesn't have them)
     sections = data.get('sections', [])
     test_id = data.get('test_id', '')
+    is_practice = bool(data.get('practice', False))
     tests = cached_scan()
-    question_data_map = {}  # Also build error bank data in same pass
+    # question_data_map is only consumed by _populate_error_bank(), which skips
+    # practice submissions. Building it for practice mode wastes work on every
+    # question — guard construction behind the same check.
+    question_data_map = {} if not is_practice else None
     if test_id in tests:
         answer_key = {}
         t = tests[test_id]
@@ -431,29 +436,32 @@ def api_save_results():
                         qt = pg.get('question_type', '')
                         if qt == 'mc':
                             answer_key[qid] = {'expected': pg.get('answer', '')}
-                            question_data_map[qid] = {
-                                'type': 'mc', 'prompt': pg.get('prompt', ''),
-                                'choices': pg.get('choices', {}), 'answer': pg.get('answer', ''),
-                                'passage': pg.get('passage', '')[:500],
-                            }
+                            if question_data_map is not None:
+                                question_data_map[qid] = {
+                                    'type': 'mc', 'prompt': pg.get('prompt', ''),
+                                    'choices': pg.get('choices', {}), 'answer': pg.get('answer', ''),
+                                    'passage': pg.get('passage', '')[:500],
+                                }
                         elif qt == 'cloze':
                             fills = pg.get('cloze_fills', [])
                             words = pg.get('cloze_answers', [])
                             for i, ef in enumerate(fills):
                                 cqid = f'{qid}.{i+1}'
                                 answer_key[cqid] = {'expected': ef, 'fullWord': words[i] if i < len(words) else ef}
-                                question_data_map[cqid] = {
-                                    'type': 'cloze', 'fill': ef,
-                                    'full_word': words[i] if i < len(words) else ef,
-                                    'passage': pg.get('passage', '')[:500],
-                                }
+                                if question_data_map is not None:
+                                    question_data_map[cqid] = {
+                                        'type': 'cloze', 'fill': ef,
+                                        'full_word': words[i] if i < len(words) else ef,
+                                        'passage': pg.get('passage', '')[:500],
+                                    }
                         elif qt == 'build_sentence':
                             answer_key[qid] = {'expected': pg.get('answer', '')}
-                            question_data_map[qid] = {
-                                'type': 'build_sentence',
-                                'details': pg.get('details', {}),
-                                'answer': pg.get('answer', ''),
-                            }
+                            if question_data_map is not None:
+                                question_data_map[qid] = {
+                                    'type': 'build_sentence',
+                                    'details': pg.get('details', {}),
+                                    'answer': pg.get('answer', ''),
+                                }
         for sec in sections:
             for d in sec.get('details', []):
                 qid = str(d.get('qid', ''))
@@ -463,16 +471,16 @@ def api_save_results():
     # This runs even if test_id was not found — unverifiable questions get correct=None
     for sec in sections:
         for d in sec.get('details', []):
-            dt_ = d.get('type', '')
-            if dt_ == 'mc' and 'expected' in d:
+            qtype = d.get('type', '')
+            if qtype == 'mc' and 'expected' in d:
                 d['correct'] = (d.get('user', '') == d['expected'])
-            elif dt_ == 'cloze' and 'expected' in d:
+            elif qtype == 'cloze' and 'expected' in d:
                 d['correct'] = (d.get('user', '').strip().lower() == d['expected'].lower())
-            elif dt_ == 'build_sentence' and 'expected' in d:
+            elif qtype == 'build_sentence' and 'expected' in d:
                 usr = _RE_PUNCT.sub('', (d.get('user', '') or '').strip().lower())
                 exp = _RE_PUNCT.sub('', d['expected'].strip().lower())
                 d['correct'] = (usr == exp)
-            elif dt_ in ('mc', 'cloze', 'build_sentence') and 'expected' not in d:
+            elif qtype in ('mc', 'cloze', 'build_sentence') and 'expected' not in d:
                 # Cannot verify without answer key — strip client-sent correctness
                 d['correct'] = None
         # Recalculate per-section score from verified details
@@ -483,15 +491,15 @@ def api_save_results():
     total_correct = sum(sec.get('score', {}).get('correct', 0) for sec in sections)
     total_questions = sum(sec.get('score', {}).get('total', 0) for sec in sections)
     result_id = db.save_result(u['id'], test_id, data.get('test_name',''),
-        data.get('practice',False), total_correct,
+        is_practice, total_correct,
         total_questions, json.dumps(sections))
     session_id = data.get('session_id')
     if session_id:
         try: db.finish_session(session_id)
         except Exception: pass
     # Auto-populate error bank (non-practice only), reusing parsed data
-    if not data.get('practice', False):
-        _populate_error_bank(u['id'], test_id, sections, question_data_map)
+    if not is_practice:
+        _populate_error_bank(u['id'], test_id, sections, question_data_map or {})
     return jsonify({'ok':True, 'result_id': result_id})
 
 # ===== Server-side Test Sessions =====
@@ -508,18 +516,13 @@ def api_session_start():
     section = data.get('section') or None
     practice = data.get('practice', False)
     playlist = data.get('playlist', [])
-    # Schedule enforcement: block if student has a scheduled assignment outside its window
-    # schedule_start/end come from <input type="datetime-local"> which is LOCAL time —
-    # compare against local now(), not utcnow(), so the window behaves as the teacher intended.
-    if u['role'] == 'student' and not practice:
-        my_assignments = db.get_assignments(student_id=u['id'])
-        for a in my_assignments:
-            if a['test_id'] == test_id and (not section or a.get('section') == section):
-                now = dt.now().strftime('%Y-%m-%dT%H:%M')
-                if a.get('schedule_start') and a['schedule_start'] > now:
-                    return jsonify({'error': 'not_yet_available', 'message': 'This test is not available yet.'}), 403
-                if a.get('schedule_end') and a['schedule_end'] < now:
-                    return jsonify({'error': 'schedule_expired', 'message': 'The schedule for this test has ended.'}), 403
+    # Schedule enforcement for scheduled student assignments. The same check runs
+    # in take_test() for the page-load path; extracted to helpers.check_schedule_window
+    # so the two surfaces can never drift.
+    if not practice:
+        allowed, err_code, err_msg = check_schedule_window(u, test_id, section)
+        if not allowed:
+            return jsonify({'error': err_code, 'message': err_msg}), 403
     # Check for existing active session
     existing = db.get_active_session(u['id'], test_id, mode, section, practice)
     if existing:
@@ -686,20 +689,13 @@ def take_test(test_id):
     if not u and not is_guest: return redirect('/login')
     tests = cached_scan()
     if test_id not in tests: abort(404)
-    # Schedule enforcement: if student has a scheduled assignment, check time window
-    # schedule_start/end come from <input type="datetime-local"> which is LOCAL time —
-    # compare against local now(), not utcnow(), so the window behaves as the teacher intended.
-    if u and u['role'] == 'student':
-        my_assignments = db.get_assignments(student_id=u['id'])
-        for a in my_assignments:
-            if a['test_id'] == test_id:
-                now = dt.now().strftime('%Y-%m-%dT%H:%M')
-                if a.get('schedule_start') and a['schedule_start'] > now:
-                    flash('This test is not available yet. It opens at ' + fmtdate_full(a['schedule_start']))
-                    return redirect('/assignments')
-                if a.get('schedule_end') and a['schedule_end'] < now:
-                    flash('The schedule for this test has ended.')
-                    return redirect('/assignments')
+    # Schedule enforcement for students with scheduled assignments. Same logic as
+    # api_session_start, extracted into helpers so both surfaces stay in sync.
+    if u:
+        allowed, _err_code, err_msg = check_schedule_window(u, test_id)
+        if not allowed:
+            flash(err_msg)
+            return redirect('/assignments')
     return render_template('test.html', test_info=tests[test_id], user=u, is_guest=is_guest)
 
 @app.route('/audio/<path:filepath>')
@@ -855,7 +851,6 @@ def admin_announcement():
     content = request.form.get('content', '').strip()
     if content:
         db.create_announcement(cur_user()['id'], content)
-        _invalidate_announcement_cache()
         flash('Announcement posted')
     return redirect('/admin/users')
 
@@ -864,7 +859,6 @@ def admin_announcement():
 @require_role('admin')
 def admin_dismiss_announcement():
     db.dismiss_announcement()
-    _invalidate_announcement_cache()
     flash('Announcement dismissed')
     return redirect('/admin/users')
 
@@ -1032,6 +1026,11 @@ def account():
             flash('New password must be at least 6 characters')
         else:
             db.update_user(u['id'], password=new_pw)
+            # Revoke all issued API tokens on password change. Any native client
+            # still using an old bearer token should re-authenticate. Without this,
+            # a leaked token would survive the password rotation that was supposed
+            # to contain it.
+            db.revoke_all_api_tokens(u['id'])
             flash('Password changed successfully')
         return redirect('/account')
     return render_template('account.html', user=u)
@@ -1785,5 +1784,9 @@ if __name__ == '__main__':
     p.add_argument('--host',default='0.0.0.0')
     a = p.parse_args()
     print(f'Starting on http://{a.host}:{a.port}')
-    print(f'Default admin: admin / admin')
+    # Print the configured (not hardcoded) default credentials, and only in dev.
+    # Production deployments set TOEFL_BEHIND_HTTPS=1 and should not see this.
+    if not os.environ.get('TOEFL_BEHIND_HTTPS'):
+        _admin_cfg = (SITE_CONFIG or {}).get('default_admin', {})
+        print(f"Default admin: {_admin_cfg.get('username', 'admin')} / {_admin_cfg.get('password', 'admin')}")
     app.run(debug=True, host=a.host, port=a.port)

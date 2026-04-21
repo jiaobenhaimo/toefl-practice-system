@@ -10,7 +10,7 @@
     <div id="review-main" class="screen">
         <header class="test-header" role="banner">
             <div class="test-header__left">
-                <a href="{% if user.role in ('admin','teacher') %}/teacher/results{% elif user.role == 'parent' %}/parent{% else %}/history{% endif %}" class="btn btn--icon" title="Back" aria-label="Back">
+                <a href="#" id="rv-back-link" class="btn btn--icon" title="Back" aria-label="Back" onclick="event.preventDefault(); window.location.href = BACK_URL;">
                     <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4L7 10l6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
                 </a>
                 <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" id="theme-toggle-test">
@@ -21,7 +21,7 @@
                 <div class="test-header__section" id="rv-section-label">Review</div>
             </div>
             <div class="test-header__right">
-                <select id="rv-module-select" class="login-input" style="font-size:0.82rem;min-height:44px;max-width:240px;padding:0 28px 0 10px" onchange="jumpToModuleSelect()" aria-label="Jump to module"></select>
+                <select id="rv-module-select" class="login-input login-input--sm" onchange="jumpToModuleSelect()" aria-label="Jump to module"></select>
             </div>
         </header>
 
@@ -47,7 +47,19 @@
 var RESULT_ID = {{ result.id }};
 var USER_ROLE = {{ user.role|tojson }};
 var USER_ID = {{ user.id }};
-var BACK_URL = {% if user.role in ('admin','teacher') %}'/teacher/results'{% elif user.role == 'parent' %}'/parent'{% else %}'/history'{% endif %};
+// Back link: prefer the page the user actually came from (e.g. /teacher/student/<id>)
+// when it's same-origin and not another review page, otherwise fall back to the
+// role-appropriate landing.
+var DEFAULT_BACK = {% if user.role in ('admin','teacher') %}'/teacher/results'{% elif user.role == 'parent' %}'/parent'{% else %}'/history'{% endif %};
+var BACK_URL = (function() {
+    try {
+        var ref = document.referrer || '';
+        if (ref && ref.indexOf(location.origin) === 0 && ref.indexOf('/review/') === -1) {
+            return ref;
+        }
+    } catch (e) {}
+    return DEFAULT_BACK;
+})();
 var _data = null;
 var _allPages = [];
 var _pageIdx = 0;

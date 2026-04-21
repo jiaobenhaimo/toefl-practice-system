@@ -210,24 +210,21 @@ def init_db(config=None):
     """
     conn = _connect()
     conn.executescript(SCHEMA)
-    # Migrate: add due_date to test_assignments if missing
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(test_assignments)").fetchall()]
-    if 'due_date' not in cols:
+    # Migrate: add missing columns on each table. Do one PRAGMA read per table,
+    # then check all columns at once.
+    assign_cols = {r[1] for r in conn.execute("PRAGMA table_info(test_assignments)").fetchall()}
+    if 'due_date' not in assign_cols:
         conn.execute("ALTER TABLE test_assignments ADD COLUMN due_date TEXT DEFAULT NULL")
-    # Migrate: add linked_student_id to users for parent role
-    user_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
-    if 'linked_student_id' not in user_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN linked_student_id INTEGER DEFAULT NULL")
-    # Migrate: add submitted column to teacher_comments for rubric draft/submit workflow
-    tc_cols = [r[1] for r in conn.execute("PRAGMA table_info(teacher_comments)").fetchall()]
-    if 'submitted' not in tc_cols:
-        conn.execute("ALTER TABLE teacher_comments ADD COLUMN submitted INTEGER NOT NULL DEFAULT 1")
-    # Migrate: add schedule_start/schedule_end to test_assignments for scheduling
-    assign_cols = [r[1] for r in conn.execute("PRAGMA table_info(test_assignments)").fetchall()]
     if 'schedule_start' not in assign_cols:
         conn.execute("ALTER TABLE test_assignments ADD COLUMN schedule_start TEXT DEFAULT NULL")
     if 'schedule_end' not in assign_cols:
         conn.execute("ALTER TABLE test_assignments ADD COLUMN schedule_end TEXT DEFAULT NULL")
+    user_cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if 'linked_student_id' not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN linked_student_id INTEGER DEFAULT NULL")
+    tc_cols = {r[1] for r in conn.execute("PRAGMA table_info(teacher_comments)").fetchall()}
+    if 'submitted' not in tc_cols:
+        conn.execute("ALTER TABLE teacher_comments ADD COLUMN submitted INTEGER NOT NULL DEFAULT 1")
     # Create indexes (idempotent). Significantly speed up repeated per-user lookups
     # in get_results, get_analytics, get_assignments, and get_active_session.
     conn.executescript("""
@@ -238,6 +235,7 @@ def init_db(config=None):
     CREATE INDEX IF NOT EXISTS idx_sessions_user_finished ON test_sessions(user_id, finished, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comments_result ON teacher_comments(result_id);
+    CREATE INDEX IF NOT EXISTS idx_comments_result_qid ON teacher_comments(result_id, question_id);
     CREATE INDEX IF NOT EXISTS idx_error_bank_user_review ON error_bank(user_id, next_review);
     CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
     CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, revoked);
@@ -411,10 +409,18 @@ def count_results(user_id=None, test_id=None):
 def assign_test(teacher_id, student_id, test_id, section=None, due_date=None, schedule_start=None, schedule_end=None):
     """Assign a test (or section) to a student with optional due date and schedule window."""
     conn = get_db()
-    existing = conn.execute(
-        "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=? AND section IS ?",
-        (teacher_id, student_id, test_id, section)
-    ).fetchone()
+    # SQLite's `IS ?` with a bound NULL parameter is version-dependent; some builds
+    # won't match NULL rows. Split the query to use explicit `IS NULL` / `=?`.
+    if section is None:
+        existing = conn.execute(
+            "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=? AND section IS NULL",
+            (teacher_id, student_id, test_id)
+        ).fetchone()
+    else:
+        existing = conn.execute(
+            "SELECT id FROM test_assignments WHERE teacher_id=? AND student_id=? AND test_id=? AND section=?",
+            (teacher_id, student_id, test_id, section)
+        ).fetchone()
     if not existing:
         conn.execute(
             "INSERT INTO test_assignments (teacher_id, student_id, test_id, section, due_date, schedule_start, schedule_end) "
@@ -646,11 +652,12 @@ def get_teacher_comments(result_id, include_drafts=False):
     """Get all teacher comments for a result. Returns dict with 'overall' and per-question keys.
     By default only returns submitted comments. Set include_drafts=True for teacher view."""
     conn = get_db()
+    # Comments are unique per (teacher, result, question_id) so no ORDER BY needed —
+    # each row maps to a distinct dict key.
     query = ("SELECT tc.*, u.display_name FROM teacher_comments tc JOIN users u ON tc.teacher_id=u.id "
              "WHERE tc.result_id=?")
     if not include_drafts:
         query += " AND tc.submitted=1"
-    query += " ORDER BY tc.updated_at DESC"
     rows = conn.execute(query, (result_id,)).fetchall()
     result = {}
     for r in rows:
@@ -771,11 +778,19 @@ def create_session(user_id, test_id, mode, section, practice, playlist_json, tim
 def get_active_session(user_id, test_id, mode, section, practice):
     """Find an unfinished session for this user/test/mode combo."""
     conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM test_sessions WHERE user_id=? AND test_id=? AND mode=? "
-        "AND section IS ? AND practice=? AND finished=0 ORDER BY updated_at DESC LIMIT 1",
-        (user_id, test_id, mode, section, 1 if practice else 0)
-    ).fetchone()
+    # SQLite `section IS ?` with bound NULL is version-dependent — split the query.
+    if section is None:
+        row = conn.execute(
+            "SELECT * FROM test_sessions WHERE user_id=? AND test_id=? AND mode=? "
+            "AND section IS NULL AND practice=? AND finished=0 ORDER BY updated_at DESC LIMIT 1",
+            (user_id, test_id, mode, 1 if practice else 0)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM test_sessions WHERE user_id=? AND test_id=? AND mode=? "
+            "AND section=? AND practice=? AND finished=0 ORDER BY updated_at DESC LIMIT 1",
+            (user_id, test_id, mode, section, 1 if practice else 0)
+        ).fetchone()
     return dict(row) if row else None
 
 
